@@ -1,9 +1,18 @@
 """Ponto de entrada do Cyber Analyst."""
 
+import sys
 
-def main() -> None:
-    print("Cyber Analyst iniciado com sucesso.")
+from PySide6.QtWidgets import QApplication
+
+from cyber_analyst.ui.main_window import MainWindow
+
+
+def main() -> int:
+    app = QApplication.instance() or QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    return app.exec()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
