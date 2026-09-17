@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from cyber_analyst.ui.pages import PlaceholderPage
+from cyber_analyst.ui.datasets_page import DatasetsPage
 
 
 class MainWindow(QMainWindow):
@@ -49,7 +50,7 @@ class MainWindow(QMainWindow):
             button.setCheckable(True)
             self.navigation.addButton(button, index)
             navigation_layout.addWidget(button)
-            self.pages.addWidget(PlaceholderPage(title))
+            self.pages.addWidget(DatasetsPage() if title == "Datasets" else PlaceholderPage(title))
         navigation_layout.addStretch()
         self.navigation.idClicked.connect(self.pages.setCurrentIndex)
         self.navigation.button(0).setChecked(True)
