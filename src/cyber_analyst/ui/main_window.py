@@ -16,6 +16,13 @@ from cyber_analyst.ui.datasets_page import DatasetsPage
 
 
 class MainWindow(QMainWindow):
+    def closeEvent(self, event) -> None:
+        for index in range(self.pages.count()):
+            page = self.pages.widget(index)
+            if isinstance(page, DatasetsPage):
+                page.shutdown()
+        super().closeEvent(event)
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Cyber Analyst")
