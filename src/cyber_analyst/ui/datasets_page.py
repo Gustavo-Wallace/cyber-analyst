@@ -16,11 +16,12 @@ from cyber_analyst.ui.csv_worker import CsvWorker
 
 class DatasetsPage(QWidget):
     loading_finished = Signal()
+    collection_changed = Signal()
 
-    def __init__(self) -> None:
+    def __init__(self, collection: DatasetCollection | None = None) -> None:
         super().__init__()
         self.dataset: Dataset | None = None
-        self.collection = DatasetCollection()
+        self.collection = collection if collection is not None else DatasetCollection()
         self._thread = None
         self._worker = None
         self._closing = False
@@ -145,6 +146,7 @@ class DatasetsPage(QWidget):
         self.dataset_list.show()
         if self.dataset_list.currentRow() < 0:
             self.dataset_list.setCurrentRow(0)
+        self.collection_changed.emit()
 
     @Slot(str, str)
     def _record_error(self, path: str, error: str) -> None:
@@ -191,6 +193,7 @@ class DatasetsPage(QWidget):
         self.collection.remove(path)
         self.dataset_list.takeItem(row)
         self.dataset_list.setCurrentRow(min(row, self.dataset_list.count() - 1))
+        self.collection_changed.emit()
 
     @Slot()
     def shutdown(self) -> None:
