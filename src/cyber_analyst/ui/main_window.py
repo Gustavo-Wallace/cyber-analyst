@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from cyber_analyst.ui.pages import PlaceholderPage
 from cyber_analyst.ui.datasets_page import DatasetsPage
 from cyber_analyst.ui.analyses_page import AnalysesPage
+from cyber_analyst.ui.correlations_page import CorrelationsPage
 from cyber_analyst.data.dataset_collection import DatasetCollection
 
 
@@ -21,7 +22,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         for index in range(self.pages.count()):
             page = self.pages.widget(index)
-            if isinstance(page, (DatasetsPage, AnalysesPage)):
+            if isinstance(page, (DatasetsPage, AnalysesPage, CorrelationsPage)):
                 page.shutdown()
         super().closeEvent(event)
 
@@ -54,6 +55,8 @@ class MainWindow(QMainWindow):
         self.collection = DatasetCollection()
         self.datasets_page = DatasetsPage(self.collection)
         self.analyses_page = AnalysesPage(self.collection)
+        self.correlations_page = CorrelationsPage(self.collection)
+        self.datasets_page.collection_changed.connect(self.correlations_page.refresh_datasets)
         self.datasets_page.collection_changed.connect(self.analyses_page.refresh_datasets)
         for index, title in enumerate((
             "Dashboard", "Datasets", "Análises", "Correlações",
@@ -64,7 +67,8 @@ class MainWindow(QMainWindow):
             self.navigation.addButton(button, index)
             navigation_layout.addWidget(button)
             page = (self.datasets_page if title == "Datasets" else
-                    self.analyses_page if title == "Análises" else PlaceholderPage(title))
+                    self.analyses_page if title == "Análises" else
+                    self.correlations_page if title == "Correlações" else PlaceholderPage(title))
             self.pages.addWidget(page)
         navigation_layout.addStretch()
         self.navigation.idClicked.connect(self.pages.setCurrentIndex)
