@@ -7,7 +7,7 @@ name = "cyber-analyst"
 version = "0.1.0"
 description = "Aplicação desktop local-first para análise interativa de dados de cibersegurança."
 requires-python = ">=3.12"
-dependencies = ["PySide6", "polars", "duckdb"]
+dependencies = ["PySide6", "polars", "duckdb", "jsonschema"]
 
 [project.optional-dependencies]
 dev = ["pytest"]

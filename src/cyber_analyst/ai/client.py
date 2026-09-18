@@ -56,7 +56,8 @@ class LlamaServerClient:
             raise LlamaClientError(f"Health check retornou HTTP {status}.")
         return status
 
-    def chat(self, messages: list[dict[str, str]]) -> str:
+    def chat(self, messages: list[dict[str, str]], *, temperature=None, top_p=None,
+             max_tokens=None, timeout=None, response_format=None, chat_template_kwargs=None) -> str:
         """Envia mensagens sem streaming e retorna somente o texto da resposta."""
         if not isinstance(messages, list) or not messages:
             raise LlamaClientError("Forneça uma lista não vazia de mensagens.")
@@ -65,9 +66,13 @@ class LlamaServerClient:
                     or message["role"] not in ("system", "user", "assistant")
                     or not isinstance(message["content"], str)):
                 raise LlamaClientError("Cada mensagem deve conter role e content textuais válidos.")
-        status, raw = self._request("POST", "/v1/chat/completions", {
-            "messages": messages, "stream": False,
-        })
+        payload = {"messages": messages, "stream": False}
+        for name, value in (("temperature", temperature), ("top_p", top_p),
+                            ("max_tokens", max_tokens), ("response_format", response_format),
+                            ("chat_template_kwargs", chat_template_kwargs)):
+            if value is not None:
+                payload[name] = value
+        status, raw = self._request("POST", "/v1/chat/completions", payload, timeout=timeout)
         if status != 200:
             raise LlamaClientError(f"Chat retornou HTTP {status}.")
         try:

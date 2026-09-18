@@ -30,6 +30,21 @@ def test_chat_request(transport):
     connection.close.assert_called_once()
 
 
+def test_extended_request(transport):
+    factory, connection, _ = transport
+    client = LlamaServerClient("http://127.0.0.1:12345")
+    response_format = {"type": "json_schema", "json_schema": {"name": "test", "strict": True, "schema": {"type": "object"}}}
+    client.chat([{"role": "user", "content": "test"}], temperature=0, top_p=0.9,
+                max_tokens=128, timeout=7, response_format=response_format,
+                chat_template_kwargs={"enable_thinking": False})
+    body = json.loads(connection.request.call_args.kwargs["body"])
+    assert body["response_format"] == response_format
+    assert body["temperature"] == 0 and body["max_tokens"] == 128
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
+    assert body["stream"] is False
+    factory.assert_called_once_with("127.0.0.1", 12345, timeout=7)
+
+
 @pytest.mark.parametrize("status", [200, 503])
 def test_health(transport, status):
     _, connection, response = transport
