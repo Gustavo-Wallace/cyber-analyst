@@ -1,6 +1,6 @@
 """Contexto derivado exclusivamente de metadados, perfil e preview existentes."""
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, time
 import json
 import math
@@ -8,6 +8,7 @@ import math
 from cyber_analyst.analysis.models import DatasetProfile
 from cyber_analyst.data.dataset import Dataset
 from cyber_analyst.semantic.models import SemanticUnderstandingError
+from cyber_analyst.semantic.evidence import detect_evidence
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,7 @@ class SemanticContext:
             "sampling": {"source": "existing_preview", "max_distinct_values": self.limits.samples_per_column,
                          "max_string_characters": self.limits.string_length,
                          "notice": "Strings may be truncated; temporal/non-finite values are represented as strings. Samples are not representative of all rows."},
-            "columns": [{"name": column["name"], "dtype": column["dtype"]} for column in selected] if compact else list(selected),
+            "columns": [{"name": column["name"], "dtype": column["dtype"], "deterministic_evidence": column["deterministic_evidence"]} for column in selected] if compact else list(selected),
         }
 
     def serialize(self, payload: dict) -> str:
@@ -71,6 +72,7 @@ def build_context(dataset: Dataset, profile: DatasetProfile, limits: ContextLimi
     columns = []
     for column in profile.columns:
         samples = []
+        original_samples = []
         seen = set()
         truncated = False
         for value in dataset.preview.get_column(column.name):
@@ -78,15 +80,17 @@ def build_context(dataset: Dataset, profile: DatasetProfile, limits: ContextLimi
                 continue
             truncated |= isinstance(value, str) and len(value) > limits.string_length
             sample = value_for_json(value)
-            key = (type(sample), sample)
+            key = (type(value), value)
             if key not in seen:
                 seen.add(key)
                 samples.append(sample)
+                original_samples.append(value)
             if len(samples) == limits.samples_per_column:
                 break
         fact = {"name": column.name, "dtype": str(column.dtype), "null_count": column.null_count,
                 "null_percentage": column.null_percentage, "unique_count": column.unique_count,
                 "sample_values": samples, "samples_truncated": truncated}
+        fact["deterministic_evidence"] = [asdict(item) for item in detect_evidence(original_samples)]
         if column.dtype.is_numeric():
             fact["statistics"] = {name: value_for_json(getattr(column, name))
                                   for name in ("minimum", "maximum", "mean", "median", "std")}
