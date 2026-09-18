@@ -16,9 +16,25 @@ from cyber_analyst.ui.datasets_page import DatasetsPage
 from cyber_analyst.ui.analyses_page import AnalysesPage
 from cyber_analyst.ui.correlations_page import CorrelationsPage
 from cyber_analyst.data.dataset_collection import DatasetCollection
+from cyber_analyst.data.session_results import SessionResults
+from cyber_analyst.ui.dashboard_page import DashboardPage
 
 
 class MainWindow(QMainWindow):
+    def _collection_changed(self) -> None:
+        self.session_results.invalidate(self.collection)
+        self.analyses_page.refresh_datasets()
+        self.correlations_page.refresh_datasets()
+        self.dashboard_page.refresh()
+
+    def _profile_completed(self, dataset, profile) -> None:
+        self.session_results.record_analysis(dataset, profile)
+        self.dashboard_page.refresh()
+
+    def _correlation_completed(self, result) -> None:
+        self.session_results.record_correlation(result)
+        self.dashboard_page.refresh()
+
     def closeEvent(self, event) -> None:
         for index in range(self.pages.count()):
             page = self.pages.widget(index)
@@ -53,11 +69,14 @@ class MainWindow(QMainWindow):
         self.navigation.setExclusive(True)
         self.pages = QStackedWidget()
         self.collection = DatasetCollection()
+        self.session_results = SessionResults()
+        self.dashboard_page = DashboardPage(self.collection, self.session_results)
         self.datasets_page = DatasetsPage(self.collection)
         self.analyses_page = AnalysesPage(self.collection)
         self.correlations_page = CorrelationsPage(self.collection)
-        self.datasets_page.collection_changed.connect(self.correlations_page.refresh_datasets)
-        self.datasets_page.collection_changed.connect(self.analyses_page.refresh_datasets)
+        self.datasets_page.collection_changed.connect(self._collection_changed)
+        self.analyses_page.profile_completed.connect(self._profile_completed)
+        self.correlations_page.result_completed.connect(self._correlation_completed)
         for index, title in enumerate((
             "Dashboard", "Datasets", "Análises", "Correlações",
             "AI Analyst", "Workspace", "Configurações",
@@ -66,7 +85,8 @@ class MainWindow(QMainWindow):
             button.setCheckable(True)
             self.navigation.addButton(button, index)
             navigation_layout.addWidget(button)
-            page = (self.datasets_page if title == "Datasets" else
+            page = (self.dashboard_page if title == "Dashboard" else
+                    self.datasets_page if title == "Datasets" else
                     self.analyses_page if title == "Análises" else
                     self.correlations_page if title == "Correlações" else PlaceholderPage(title))
             self.pages.addWidget(page)

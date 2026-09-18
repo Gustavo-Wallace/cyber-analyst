@@ -13,6 +13,7 @@ from cyber_analyst.ui.analysis_worker import AnalysisWorker
 
 class AnalysesPage(QWidget):
     analysis_finished = Signal()
+    profile_completed = Signal(object, object)
 
     def __init__(self, collection: DatasetCollection) -> None:
         super().__init__()
@@ -174,6 +175,7 @@ class AnalysesPage(QWidget):
             message.exec()
         elif valid and isinstance(self._result, DatasetProfile):
             self.profile = self._result
+            self.profile_completed.emit(self._active_dataset, self.profile)
             self.summary.setText(f"{self.profile.name}\nLinhas: {self.profile.row_count}    "
                                  f"Colunas: {self.profile.column_count}    Nulos: {self.profile.null_count}")
             self.profile_table.setRowCount(len(self.profile.columns))

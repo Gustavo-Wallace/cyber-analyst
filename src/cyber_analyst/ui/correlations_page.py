@@ -12,6 +12,7 @@ from cyber_analyst.ui.correlation_worker import CorrelationWorker
 
 class CorrelationsPage(QWidget):
     correlation_finished = Signal()
+    result_completed = Signal(object)
 
     def __init__(self, collection: DatasetCollection):
         super().__init__()
@@ -174,6 +175,7 @@ class CorrelationsPage(QWidget):
             message.exec()
         elif valid and self._pending is not None:
             self.result = self._pending
+            self.result_completed.emit(self.result)
             s = self.result.summary
             self.summary.setText(
                 f"A: {self.result.dataset_a.name} · B: {self.result.dataset_b.name}\n"
