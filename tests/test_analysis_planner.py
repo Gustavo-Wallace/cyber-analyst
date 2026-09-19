@@ -153,7 +153,13 @@ def test_context_compatibility_before_ai(tmp_path,mismatch):
 
 @pytest.mark.parametrize('count',[8,9])
 def test_selection_bound_with_distinct_ids(tmp_path,count):
-    data=inputs(tmp_path); candidates=generate_candidates(**data)
+    path=tmp_path/'wide.csv'
+    path.write_text('a,b,c,d\nx,x,x,x\ny,y,y,y\n')
+    dataset=load_csv(path)
+    understanding=DatasetUnderstanding(path,dataset.name,'unknown','generic',0.2,'',tuple(
+        ColumnUnderstanding(name,'category',None,0.2,False) for name in dataset.columns))
+    data=dict(dataset=dataset,profile=profile_dataset(dataset),understanding=understanding)
+    candidates=[c for c in generate_candidates(**data) if c.operation not in ('top_values','group_count')]
     assert len(candidates)>=9
     ai=Mock(); ai.generate_structured.return_value={'selections':[
         {'candidate_id':c.candidate_id,'rationale':'Evaluate quality'} for c in candidates[:count]]}
@@ -179,7 +185,7 @@ def test_ai_cannot_override_fixed_parameters(tmp_path,field,value):
 
 @pytest.mark.parametrize('operation',list(CONTRACTS))
 def test_each_operation_resolves_to_existing_contract(tmp_path,operation):
-    data=inputs(tmp_path)
+    data=high_cardinality_inputs(tmp_path) if operation=='top_values' else inputs(tmp_path)
     c=next(c for c in generate_candidates(**data) if c.operation==operation)
     ai=Mock(); ai.generate_structured.return_value={'selections':[{'candidate_id':c.candidate_id,'rationale':'test'}]}
     plan=AnalysisPlannerService(ai).plan(**data)
@@ -262,3 +268,109 @@ def test_retry_returns_only_second_complete_selection(tmp_path):
     assert [s.id for s in plan.steps]==[candidates[1].candidate_id]
     assert first==snapshot
     assert ai.generate_structured.call_count==2
+
+
+def frequency_selection(candidates):
+    return {'selections':[{'candidate_id':c.candidate_id,'rationale':'test'} for c in candidates]}
+
+
+@pytest.mark.parametrize('operations', [('column_distribution','top_values'),
+    ('column_distribution','group_count'),('top_values','group_count'),
+    ('column_distribution','top_values','group_count')])
+def test_frequency_conflict_exhausted(tmp_path,operations,monkeypatch):
+    data=inputs(tmp_path); candidates=inject_frequency_alternatives(data,monkeypatch)
+    selected=[next(c for c in candidates if c.operation==op and (c.columns or c.group_by)==('label',)) for op in operations]
+    ai=Mock(); ai.generate_structured.return_value=frequency_selection(selected)
+    with pytest.raises(AnalysisPlanningError,match='value_frequency'):
+        AnalysisPlannerService(ai).plan(**data)
+    assert ai.generate_structured.call_count==2
+
+
+def test_frequency_different_scopes_allowed(tmp_path):
+    data=inputs(tmp_path); candidates=generate_candidates(**data)
+    selected=[next(c for c in candidates if c.operation=='column_distribution' and c.columns==('label',)),
+              next(c for c in candidates if c.operation=='column_distribution' and c.columns==('amount',))]
+    ai=Mock(); ai.generate_structured.return_value=frequency_selection(selected)
+    assert len(AnalysisPlannerService(ai).plan(**data).steps)==2
+    assert ai.generate_structured.call_count==1
+
+
+def test_other_families_remain_independent(tmp_path):
+    from cyber_analyst.planning.service import informational_group
+    data=inputs(tmp_path); candidates=generate_candidates(**data)
+    selected=[c for c in candidates if c.operation in ('null_analysis','unique_count','numeric_summary','cross_tab','time_series_count')]
+    assert all(informational_group(c) is None for c in selected)
+    selected.append(next(c for c in candidates if c.operation=='column_distribution' and c.columns==('amount',)))
+    ai=Mock(); ai.generate_structured.return_value=frequency_selection(selected)
+    assert len(AnalysisPlannerService(ai).plan(**data).steps)==len(selected)
+
+
+def test_family_retry_success_no_silent_removal(tmp_path,monkeypatch):
+    data=inputs(tmp_path); candidates=inject_frequency_alternatives(data,monkeypatch)
+    selected=[c for c in candidates if c.operation in ('top_values','column_distribution') and c.columns==('label',)]
+    first=frequency_selection(selected); snapshot=deepcopy(first)
+    ai=Mock(); ai.generate_structured.side_effect=[first,frequency_selection(selected[1:])]
+    plan=AnalysisPlannerService(ai).plan(**data)
+    assert [s.id for s in plan.steps]==[selected[1].candidate_id]
+    assert ai.generate_structured.call_count==2 and first==snapshot
+    payload=json.loads(ai.generate_structured.call_args_list[0].kwargs['messages'][1]['content'])
+    assert len(payload['candidates'])==len(candidates)
+    family=[c['informational_group'] for c in payload['candidates'] if c['candidate_id'] in {s.candidate_id for s in selected}]
+    assert family==[['value_frequency',['label']]]*2
+    feedback=ai.generate_structured.call_args.kwargs['messages'][-1]['content']
+    assert 'value_frequency' in feedback and 'choose one' in feedback
+
+
+def test_scope_grouping_is_canonical():
+    from cyber_analyst.planning.models import AnalysisCandidate
+    from cyber_analyst.planning.service import informational_group
+    a=AnalysisCandidate('a','group_count',(),('b','a'),None,10,'test')
+    b=replace(a,candidate_id='b',group_by=('a','b'),limit=100)
+    assert informational_group(a)==informational_group(b)
+    assert informational_group(a)!=informational_group(replace(a,group_by=('a',)))
+
+
+# Deliberately injected alternatives exercise defense-in-depth even though normal
+# generation no longer offers equivalent single-column family members.
+def inject_frequency_alternatives(data,monkeypatch):
+    from cyber_analyst.planning import service
+    candidates=generate_candidates(**data)
+    base=next(c for c in candidates if c.operation=='column_distribution' and c.columns==('label',))
+    candidates=(*candidates,replace(base,candidate_id='test_top',operation='top_values'),
+                replace(base,candidate_id='test_group',operation='group_count',columns=(),group_by=('label',)))
+    monkeypatch.setattr(service,'generate_candidates',lambda **kwargs:candidates)
+    return candidates
+
+
+def high_cardinality_inputs(tmp_path):
+    path=tmp_path/'rank.csv'
+    path.write_text('category\n'+'\n'.join([f'value{i}' for i in range(25)]*2)+'\n')
+    dataset=load_csv(path)
+    u=DatasetUnderstanding(path,dataset.name,'unknown','generic',0.2,'',
+        (ColumnUnderstanding('category','category',None,0.2,False),))
+    return dict(dataset=dataset,profile=profile_dataset(dataset),understanding=u)
+
+
+def test_normalized_frequency_scopes(tmp_path):
+    from cyber_analyst.planning.service import informational_group
+    candidates=generate_candidates(**inputs(tmp_path))
+    groups=[informational_group(c) for c in candidates if informational_group(c) is not None]
+    assert len(groups)==len(set(groups))
+    for name in ('label','amount'):
+        single=[c for c in candidates if informational_group(c)==('value_frequency',(name,))]
+        assert len(single)==1 and single[0].operation=='column_distribution'
+    assert any(c.operation=='group_count' and set(c.group_by)=={'label','amount'} for c in candidates)
+    assert any(c.operation=='cross_tab' and set(c.columns)=={'label','amount'} for c in candidates)
+    assert {'null_analysis','unique_count','numeric_summary','time_series_count'} <= {c.operation for c in candidates}
+
+
+def test_high_cardinality_ranking(tmp_path):
+    from cyber_analyst.planning.service import informational_group
+    data=high_cardinality_inputs(tmp_path)
+    frequency=[c for c in generate_candidates(**data) if informational_group(c)]
+    assert len(frequency)==1
+    assert frequency[0].operation=='top_values'
+    assert frequency[0].columns==('category',) and frequency[0].limit==20
+    # Identifiers and entirely unique values do not justify this ranking rule.
+    data['understanding']=replace(data['understanding'],columns=(replace(data['understanding'].columns[0],is_identifier=True),))
+    assert not any(c.operation=='top_values' for c in generate_candidates(**data))
