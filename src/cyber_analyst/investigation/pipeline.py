@@ -1,5 +1,6 @@
 """Sequential composition only: no loading, inference rules or analytical logic."""
 from typing import Iterable
+from dataclasses import replace
 
 from cyber_analyst.analysis.exploratory import profile_dataset
 from cyber_analyst.data.dataset import Dataset
@@ -19,12 +20,13 @@ def _stage(stage, dataset, function, /, *args, **kwargs):
 
 class InvestigationPipeline:
     def __init__(self, *, semantic_service, analysis_planner, analysis_executor,
-                 correlation_planner, correlation_executor):
+                 correlation_planner, correlation_executor, finding_service):
         self.semantic_service = semantic_service
         self.analysis_planner = analysis_planner
         self.analysis_executor = analysis_executor
         self.correlation_planner = correlation_planner
         self.correlation_executor = correlation_executor
+        self.finding_service = finding_service
 
     def run(self, datasets: Iterable[Dataset]) -> InvestigationResult:
         try:
@@ -53,4 +55,6 @@ class InvestigationPipeline:
         else:
             correlation_plan = CorrelationPlan(())
             correlation_execution = CorrelationExecutionResult(())
-        return InvestigationResult(tuple(results), correlation_plan, correlation_execution)
+        investigation = InvestigationResult(tuple(results), correlation_plan, correlation_execution)
+        findings = _stage('findings', None, self.finding_service.generate, investigation)
+        return replace(investigation, findings=findings)

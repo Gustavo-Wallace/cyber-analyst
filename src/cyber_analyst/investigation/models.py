@@ -8,6 +8,7 @@ from cyber_analyst.planning.models import AnalysisPlan
 from cyber_analyst.execution.models import AnalysisExecutionResult
 from cyber_analyst.correlation.planner import CorrelationPlan
 from cyber_analyst.correlation.execution import CorrelationExecutionResult
+from cyber_analyst.findings.models import FindingResult
 
 
 class InvestigationPipelineError(Exception):
@@ -33,3 +34,5 @@ class InvestigationResult:
     datasets: tuple[DatasetInvestigationResult, ...]
     correlation_plan: CorrelationPlan
     correlation_execution: CorrelationExecutionResult
+    # None only before finding generation; successful pipeline results always include it.
+    findings: FindingResult | None = None
