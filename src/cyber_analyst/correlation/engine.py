@@ -45,18 +45,27 @@ def _relation(connection, dataset: Dataset, name: str) -> None:
     ).create_view(name)
 
 
-def correlate(dataset_a: Dataset, dataset_b: Dataset, column_a: str, column_b: str,
-              preview_limit: int = 100) -> CorrelationResult:
+def validate_compatibility(dataset_a: Dataset, dataset_b: Dataset, column_a: str, column_b: str) -> None:
+    """Validação compartilhada, sem acesso a CSV ou execução de correlação."""
     if dataset_a.path.resolve() == dataset_b.path.resolve():
         raise CorrelationError("Selecione datasets diferentes.")
     if column_a not in dataset_a.schema or column_b not in dataset_b.schema:
         raise CorrelationError("Coluna inexistente em um dos datasets.")
-    if isinstance(preview_limit, bool) or not isinstance(preview_limit, int) or preview_limit < 1:
-        raise CorrelationError("O limite do preview deve ser um inteiro positivo.")
     dtype_a, dtype_b = dataset_a.schema[column_a], dataset_b.schema[column_b]
     if (dataset_a.row_count and dataset_b.row_count and dtype_a != dtype_b
             and not (dtype_a.is_integer() and dtype_b.is_integer())):
         raise CorrelationError(f"Tipos incompatíveis: {dtype_a} e {dtype_b}. Não será feita coerção automática.")
+    for dataset in (dataset_a, dataset_b):
+        if any(dtype not in _TYPES for dtype in dataset.schema.values()):
+            raise CorrelationError("Tipo ainda não suportado na correlação.")
+
+
+def correlate(dataset_a: Dataset, dataset_b: Dataset, column_a: str, column_b: str,
+              preview_limit: int = 100) -> CorrelationResult:
+    validate_compatibility(dataset_a, dataset_b, column_a, column_b)
+    if isinstance(preview_limit, bool) or not isinstance(preview_limit, int) or preview_limit < 1:
+        raise CorrelationError("O limite do preview deve ser um inteiro positivo.")
+    dtype_a, dtype_b = dataset_a.schema[column_a], dataset_b.schema[column_b]
     index_a, index_b = dataset_a.columns.index(column_a), dataset_b.columns.index(column_b)
 
     def key(index, dtype):
