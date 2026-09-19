@@ -11,6 +11,17 @@ class AnalysisPlanningError(Exception):
 
 
 @dataclass(frozen=True)
+class AnalysisCandidate:
+    candidate_id: str
+    operation: str
+    columns: tuple[str, ...]
+    group_by: tuple[str, ...]
+    time_column: str | None
+    limit: int | None
+    description: str
+
+
+@dataclass(frozen=True)
 class AnalysisStep:
     id: str
     operation: str
