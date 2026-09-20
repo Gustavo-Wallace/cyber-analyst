@@ -117,3 +117,29 @@ def test_empty_text_is_provider_error():
 def test_config_validation(kwargs):
     with pytest.raises(AIError):
         InferenceConfig(**kwargs)
+
+
+@pytest.mark.parametrize('text', [
+    '{"status":"bad","status":"ok","number":42}',
+    '{"nested":{"key":1,"key":2}}',
+    '{"items":[{"key":1,"key":1}]}',
+    r'{"key":1,"\u006bey":2}',
+])
+def test_duplicate_json_keys_rejected(text):
+    service, client=setup_service([text]*3)
+    with pytest.raises(AIStructuredOutputError) as error:
+        service.generate_structured(MESSAGES,'duplicates',{'type':'object'})
+    assert error.value.reason=='invalid_json'
+    assert error.value.attempts==client.chat.call_count==3
+
+
+def test_duplicate_keys_structured_retry_recovers():
+    service, client=setup_service(['{"status":"ok","number":1,"number":42}',
+                                  '{"status":"ok","number":42}'])
+    assert service.generate_structured(MESSAGES,'test',SCHEMA)=={'status':'ok','number':42}
+    assert client.chat.call_count==2
+
+
+def test_same_key_in_distinct_objects_allowed():
+    service, _=setup_service(['{"a":{"key":1},"b":{"key":2}}'])
+    assert service.generate_structured(MESSAGES,'test',{'type':'object'})=={'a':{'key':1},'b':{'key':2}}

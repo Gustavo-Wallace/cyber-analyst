@@ -19,7 +19,6 @@ class FindingEvidence:
 class Finding:
     finding_id: str
     attention_level: str
-    confidence: float
     evidence_ids: tuple[str, ...]
 
 

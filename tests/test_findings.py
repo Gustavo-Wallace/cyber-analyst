@@ -26,73 +26,127 @@ def fixture_investigation():
     return InvestigationResult(tuple(DatasetInvestigationResult(None,None,None,None,r) for r in (auth,vulnerabilities)),CorrelationPlan(()),execution)
 
 
-def finding(ids):
-    return dict(attention_level='medium',confidence=0.8,evidence_ids=ids)
+def assignments(ids, group='g1'):
+    selected={i:group for i in ids}
+    return {**selected, **{e.evidence_id:None for e in build_evidence(fixture_investigation()) if e.evidence_id not in selected}}
 
 
-def test_evidence_actual_values_ids_immutable_no_recomputation(monkeypatch):
+def run(response):
+    response.setdefault('group_attention',{g:'medium' for g in response.get('assignments',{}).values() if isinstance(g,str)})
+    ai=Mock(); ai.generate_structured.return_value=response
+    return FindingService(ai).generate(fixture_investigation())
+
+
+@pytest.mark.parametrize('count',[0,1,2,4])
+def test_valid_selection_and_omission(count):
+    catalog=build_evidence(fixture_investigation()); ids=[e.evidence_id for e in catalog][:count]
+    result=run({'assignments':assignments(ids)})
+    assert len(result.findings)==bool(count)
+    assert len(result.evidence)==5
+    if count:
+        assert result.findings[0].evidence_ids==tuple(ids)
+        with pytest.raises(FrozenInstanceError): result.findings[0].attention_level="low"
+
+
+def test_multiple_groups():
+    ids=[e.evidence_id for e in build_evidence(fixture_investigation())]
+    result=run({'assignments':{**assignments(ids[:2]),**{k:v for k,v in assignments(ids[2:],'g2').items() if v is not None}}})
+    assert [f.evidence_ids for f in result.findings]==[tuple(ids[:2]),tuple(ids[2:])]
+    refs=[i for f in result.findings for i in f.evidence_ids]
+    assert len(refs)==len(set(refs))==5
+
+
+@pytest.mark.parametrize('value',['g9',True,1,['g1','g2'],{'group_id':'g1'}])
+def test_invalid_assignment_schema(value):
+    ids=[build_evidence(fixture_investigation())[0].evidence_id]
+    data=assignments(ids); data[ids[0]]=value
+    with pytest.raises(FindingError): run({'assignments':data,'group_attention':{}})
+
+
+def test_no_confidence_or_free_text():
+    from dataclasses import fields
+    from cyber_analyst.findings.models import Finding
+    assert {f.name for f in fields(Finding)}=={'finding_id','attention_level','evidence_ids'}
+    for field in ('confidence','title','interpretation'):
+        with pytest.raises(FindingError): run({'assignments':assignments([]),'group_attention':{},field:0.8})
+
+
+def test_unknown_key_and_old_contract_rejected():
+    for response in ({'assignments':assignments(['invented'])},{'findings':[]}):
+        with pytest.raises(FindingError): run(response)
+
+
+def test_schema_exclusive_keys_and_eight_groups():
+    from cyber_analyst.findings.service import response_schema, evidence_record
+    from jsonschema import validate, ValidationError
+    catalog=tuple(evidence_record('d','analysis',str(i),'op',{}) for i in range(9))
+    schema=response_schema(catalog); obj=schema['properties']['assignments']
+    assert obj['additionalProperties'] is False
+    assert set(obj['properties'])=={e.evidence_id for e in catalog}
+    assert set(obj['required'])==set(obj['properties'])
+    assert obj['properties'][catalog[0].evidence_id]['enum']==[None,*[f'g{i}' for i in range(1,9)]]
+    data={e.evidence_id:f'g{i+1}' for i,e in enumerate(catalog)}
+    with pytest.raises(ValidationError): validate({'assignments':data,'group_attention':{}},schema)
+
+
+@pytest.mark.parametrize('violation',['missing','unused','size'])
+@pytest.mark.parametrize('recover',[False,True])
+def test_domain_retry_all_or_nothing(violation,recover):
+    ids=[e.evidence_id for e in build_evidence(fixture_investigation())]
+    bad=assignments(ids if violation=='size' else ids[:2])
+    attention={'g1':'medium'}
+    if violation=='missing': attention={}
+    if violation=='unused': attention['g2']='low'
+    bad_response={'assignments':bad,'group_attention':attention}
+    good={'assignments':assignments(ids[-1:]),'group_attention':{'g1':'low'}}
+    ai=Mock(); ai.generate_structured.side_effect=[bad_response,good if recover else bad_response]
+    if recover:
+        result=FindingService(ai).generate(fixture_investigation())
+        assert result.findings[0].evidence_ids==(ids[-1],)
+    else:
+        with pytest.raises(FindingError,match='Domain retry exhausted'): FindingService(ai).generate(fixture_investigation())
+    assert ai.generate_structured.call_count==2
+    assert 'Violations:' in ai.generate_structured.call_args.kwargs['messages'][-1]['content']
+
+
+def test_stable_ids_original_objects_and_no_recomputation(monkeypatch):
     import polars as pl
     import duckdb
+    from hashlib import sha256
     from cyber_analyst.data import csv_loader
-    def forbidden(*args,**kwargs): raise AssertionError('recomputation')
+    from cyber_analyst.findings import service
+    def forbidden(*a,**k): raise AssertionError('recomputation')
     monkeypatch.setattr(pl.LazyFrame,'collect',forbidden)
     monkeypatch.setattr(duckdb,'connect',forbidden)
     monkeypatch.setattr(csv_loader,'load_csv',forbidden)
-    investigation=fixture_investigation(); evidence=build_evidence(investigation)
-    assert len(evidence)==5 and evidence==build_evidence(investigation)
-    assert {e.evidence_id for e in evidence}=={e.evidence_id for e in build_evidence(replace(investigation,datasets=tuple(reversed(investigation.datasets))))}
-    assert json.loads(evidence[0].payload)['rows']==[['failed',4],['success',2]]
-    assert json.loads(evidence[-1].payload)['metrics']['matched_rows']==5
-    assert 'not evidence' not in str(evidence)
-    assert 'confidence' not in json.loads(evidence[-1].payload)
-    with pytest.raises(FrozenInstanceError): evidence[0].payload='changed'
-    ai=Mock(); ai.generate_structured.return_value={'findings':[finding([evidence[0].evidence_id])]}
-    assert FindingService(ai).generate(investigation).findings
+    catalog=build_evidence(fixture_investigation())
+    assert catalog==build_evidence(fixture_investigation())
+    monkeypatch.setattr(service,'build_evidence',lambda _:catalog)
+    ids=[catalog[3].evidence_id,catalog[0].evidence_id]
+    first=run({'assignments':assignments(ids)})
+    reordered=run({'assignments':assignments(list(reversed(ids)),'g8')})
+    different=run({'assignments':assignments(ids[:1])})
+    identifier=first.findings[0].finding_id
+    assert identifier==reordered.findings[0].finding_id
+    assert identifier!=different.findings[0].finding_id
+    assert identifier=='finding_'+sha256(service._json(sorted(ids)).encode('utf-8')).hexdigest()
+    assert first.evidence_for(identifier)[0] is catalog[3]
+    assert first.evidence_for(identifier)[1] is catalog[0]
+    assert first.evidence is catalog
+    assert json.loads(catalog[3].payload)['rows'][0][-1]==2.204087112616015
+    with pytest.raises(KeyError): first.evidence_for('missing')
+    with pytest.raises(FrozenInstanceError): catalog[0].payload='changed'
 
 
-@pytest.mark.parametrize('references',[1,2,4])
-def test_valid_findings(references):
-    investigation=fixture_investigation(); ids=[e.evidence_id for e in build_evidence(investigation)][:references]
-    ai=Mock(); ai.generate_structured.return_value={'findings':[finding(ids)]}
-    result=FindingService(ai).generate(investigation)
-    assert result.findings[0].evidence_ids==tuple(ids)
-    with pytest.raises(FrozenInstanceError): result.findings=()
-
-
-def test_empty_findings_and_empty_catalog():
-    ai=Mock(); ai.generate_structured.return_value={'findings':[]}
-    assert FindingService(ai).generate(fixture_investigation()).findings==()
-    ai.reset_mock()
+def test_empty_catalog_skips_ai():
+    ai=Mock()
     assert FindingService(ai).generate(InvestigationResult((),CorrelationPlan(()),CorrelationExecutionResult(()))).findings==()
     ai.generate_structured.assert_not_called()
 
 
-@pytest.mark.parametrize('invalid',['unknown','duplicate_finding','duplicate_reference','attention','negative','over','nan','many_findings','many_references','no_reference'])
-def test_invalid(invalid):
-    investigation=fixture_investigation(); ids=[e.evidence_id for e in build_evidence(investigation)]
-    item=finding(ids[:1]); items=[item]
-    if invalid=='unknown': item['evidence_ids']=['invented']
-    elif invalid=='duplicate_finding': items.append(dict(item))
-    elif invalid=='duplicate_reference': item['evidence_ids']=[ids[0],ids[0]]
-    elif invalid=='attention': item['attention_level']='critical'
-    elif invalid=='negative': item['confidence']=-0.1
-    elif invalid=='over': item['confidence']=1.1
-    elif invalid=='nan': item['confidence']=float('nan')
-    elif invalid=='many_findings': items=[dict(item) for _ in range(9)]
-    elif invalid=='many_references': item['evidence_ids']=ids
-    else: item['evidence_ids']=[]
-    ai=Mock(); ai.generate_structured.return_value={'findings':items}
-    with pytest.raises(FindingError): FindingService(ai).generate(investigation)
-    assert ai.generate_structured.call_count==(2 if invalid in ('unknown','duplicate_finding','duplicate_reference','nan') else 1)
-
-
-def test_retry_success_complete_replacement():
-    investigation=fixture_investigation(); evidence=build_evidence(investigation)
-    ai=Mock(); ai.generate_structured.side_effect=[{'findings':[finding(['invented'])]},
-        {'findings':[finding([evidence[0].evidence_id])]}]
-    assert FindingService(ai).generate(investigation).findings[0].evidence_ids==(evidence[0].evidence_id,)
-    assert ai.generate_structured.call_count==2
-    assert 'Existing evidence' not in ai.generate_structured.call_args.kwargs['messages'][-1]['content']
+def test_ai_service_offline():
+    provider=Mock(); provider.generate_structured.return_value=json.dumps({'assignments':assignments([]),'group_attention':{}})
+    assert FindingService(AIService(provider)).generate(fixture_investigation()).findings==()
 
 
 def test_changed_values_change_id_and_bounds():
@@ -103,93 +157,15 @@ def test_changed_values_change_id_and_bounds():
     with pytest.raises(FindingError): evidence_record('d','analysis','s','op',{'rows':[['x'*16001]]})
 
 
-def test_ai_service_offline():
-    provider=Mock(); provider.generate_structured.return_value='{"findings": []}'
-    assert FindingService(AIService(provider)).generate(fixture_investigation()).findings==()
+@pytest.mark.parametrize('missing_all',[False,True])
+def test_missing_required_evidence_rejected(missing_all):
+    data=assignments([])
+    if missing_all: data.clear()
+    else: data.pop(next(iter(data)))
+    with pytest.raises(FindingError): run({'assignments':data})
 
 
-@pytest.mark.parametrize('field', ['title', 'interpretation', 'summary', 'description', 'cause'])
-def test_free_text_fields_rejected(field):
-    investigation=fixture_investigation(); catalog=build_evidence(investigation)
-    item={**finding([catalog[0].evidence_id]), field:'Unsupported factual claim'}
-    ai=Mock(); ai.generate_structured.return_value={'findings':[item]}
-    with pytest.raises(FindingError): FindingService(ai).generate(investigation)
-
-
-def test_selection_schema_and_model_have_only_controlled_fields():
-    from dataclasses import fields
-    from cyber_analyst.findings.models import Finding
+def test_empty_catalog_schema_accepts_empty_object():
+    from jsonschema import validate
     from cyber_analyst.findings.service import response_schema
-    expected={'finding_id','attention_level','confidence','evidence_ids'}
-    schema=response_schema(); item=schema['properties']['findings']['items']
-    assert set(item['properties']) == set(item['required']) == expected - {'finding_id'}
-    assert {f.name for f in fields(Finding)} == expected
-    assert item['additionalProperties'] is False
-    assert schema['additionalProperties'] is False
-
-
-def test_retry_preserves_original_evidence(monkeypatch):
-    from cyber_analyst.findings import service
-    investigation=fixture_investigation(); catalog=build_evidence(investigation)
-    payloads=tuple(e.payload for e in catalog)
-    monkeypatch.setattr(service,'build_evidence',lambda _:catalog)
-    item=finding([catalog[3].evidence_id,catalog[0].evidence_id])
-    ai=Mock(); ai.generate_structured.side_effect=[{'findings':[finding(['invented'])]},{'findings':[item]}]
-    result=FindingService(ai).generate(investigation)
-    assert result.evidence_for(result.findings[0].finding_id)[0] is catalog[3]
-    assert result.evidence_for(result.findings[0].finding_id)[1] is catalog[0]
-    assert tuple(e.payload for e in result.evidence)==payloads
-    assert json.loads(result.evidence_for(result.findings[0].finding_id)[0].payload)['rows'][0][-1]==2.204087112616015
-    with pytest.raises(KeyError): result.evidence_for('missing')
-    assert ai.generate_structured.call_count==2
-
-
-def test_invalid_selection_rejects_whole_result_after_retry():
-    catalog=build_evidence(fixture_investigation())
-    good=finding([catalog[0].evidence_id])
-    bad={**good,'evidence_ids':['invented']}
-    ai=Mock(); ai.generate_structured.return_value={'findings':[good,bad]}
-    with pytest.raises(FindingError, match='Domain retry exhausted'):
-        FindingService(ai).generate(fixture_investigation())
-    assert ai.generate_structured.call_count==2
-
-
-@pytest.mark.parametrize('identifier', ['f1', 'MFA implementation is vulnerable'])
-def test_ai_finding_id_rejected(identifier):
-    item={**finding([build_evidence(fixture_investigation())[0].evidence_id]),
-          'finding_id':identifier}
-    ai=Mock(); ai.generate_structured.return_value={'findings':[item]}
-    with pytest.raises(FindingError): FindingService(ai).generate(fixture_investigation())
-
-
-@pytest.mark.parametrize('recover', [False, True])
-def test_global_evidence_exclusivity_and_retry(recover):
-    investigation=fixture_investigation()
-    ids=[e.evidence_id for e in build_evidence(investigation)]
-    repeated={'findings':[finding(ids[:2]), finding(ids[1:3])]}
-    replacement={'findings':[finding(ids[:3]), finding(ids[3:])]}
-    ai=Mock(); ai.generate_structured.side_effect=[repeated, replacement if recover else repeated]
-    if recover:
-        result=FindingService(ai).generate(investigation)
-        assert [f.evidence_ids for f in result.findings]==[tuple(ids[:3]),tuple(ids[3:])]
-    else:
-        with pytest.raises(FindingError, match='evidence reused across findings'):
-            FindingService(ai).generate(investigation)
-    assert ai.generate_structured.call_count==2
-    assert 'evidence reused across findings' in ai.generate_structured.call_args.kwargs['messages'][-1]['content']
-
-
-def test_stable_finding_ids_depend_only_on_evidence_set():
-    investigation=fixture_investigation()
-    ids=[e.evidence_id for e in build_evidence(investigation)]
-    ai=Mock(); ai.generate_structured.side_effect=[
-        {'findings':[finding(ids[:2])]},
-        {'findings':[{**finding(list(reversed(ids[:2]))),'confidence':0.2,'attention_level':'low'}]},
-        {'findings':[finding(ids[1:3])]}]
-    service=FindingService(ai)
-    first, reordered, different=[service.generate(investigation).findings[0] for _ in range(3)]
-    assert first.finding_id==reordered.finding_id
-    assert first.finding_id!=different.finding_id
-    assert first.finding_id.startswith('finding_')
-    assert first.evidence_ids==tuple(ids[:2])
-    assert reordered.evidence_ids==tuple(reversed(ids[:2]))
+    validate({'assignments':{},'group_attention':{}},response_schema(()))

@@ -25,6 +25,15 @@ def _reject_constant(value):
     raise ValueError("Constante não permitida em JSON.")
 
 
+def _strict_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError('Duplicate JSON object key.')
+        result[key] = value
+    return result
+
+
 class AIService:
     def __init__(self, provider: AIProvider, *, config: InferenceConfig | None = None, retries: int = 2):
         if isinstance(retries, bool) or not isinstance(retries, int) or not 0 <= retries <= 2:
@@ -60,7 +69,7 @@ class AIService:
             reason = "empty_content"
             if isinstance(text, str) and text.strip():
                 try:
-                    result = json.loads(text, parse_constant=_reject_constant)
+                    result = json.loads(text, parse_constant=_reject_constant, object_pairs_hook=_strict_object)
                 except ValueError:
                     reason = "invalid_json"
                 else:
