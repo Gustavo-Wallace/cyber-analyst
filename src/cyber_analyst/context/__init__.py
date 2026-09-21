@@ -10,3 +10,7 @@ __all__ += ["InvestigationFocus", "InvestigationState", "StateService", "StateEr
 from .view import InvestigationView, ViewService
 
 __all__ += ["InvestigationView", "ViewService"]
+
+from .search import SearchResult, SearchResults, SearchService, SearchError
+
+__all__ += ["SearchResult", "SearchResults", "SearchService", "SearchError"]

@@ -1,7 +1,8 @@
 """Read-only navigation over existing investigation facts."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
+from cyber_analyst.execution.models import AnalysisStepResult
 from cyber_analyst.entities.models import EntityOccurrence
 from cyber_analyst.relations.models import Relation
 from cyber_analyst.findings.models import Finding, FindingEvidence
@@ -35,8 +36,10 @@ class InvestigationContext:
     findings: Mapping[str, Finding]
     evidence: Mapping[str, FindingEvidence]
 
+    analyses: Mapping[tuple[str, str], AnalysisStepResult] = field(default_factory=dict)
+
     def __post_init__(self):
-        for name in ('entities','datasets','relations','findings','evidence'):
+        for name in ('entities','datasets','relations','findings','evidence','analyses'):
             object.__setattr__(self,name,MappingProxyType(dict(sorted(getattr(self,name).items()))))
 
     def entity(self, entity_id: str) -> EntityContext:

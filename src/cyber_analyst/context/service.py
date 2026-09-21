@@ -63,11 +63,13 @@ class ContextService:
                     raise ContextError(f'Unknown finding evidence: {reference}')
                 ds_findings[evidence[reference].dataset_name].add(identifier)
         dataset_contexts = {}
+        analysis_index = {}
         for name,dataset in datasets.items():
             execution = dataset.analysis_execution
             if execution.dataset_name != name:
                 raise ContextError(f'Analysis dataset mismatch: {name}')
             analyses = _index(execution.results,lambda s:s.step_id,'analysis step ID')
+            analysis_index.update({(name,i):step for i,step in analyses.items()})
             dataset_contexts[name] = DatasetContext(name,tuple(sorted(ds_entities[name])),
                 tuple(sorted(ds_relations[name])),tuple(sorted(ds_findings[name])),tuple(sorted(analyses)))
         entity_contexts = {i:EntityContext(i,e.entity_type,e.canonical_value,
@@ -75,4 +77,4 @@ class ContextService:
                 o.semantic_role is not None,o.semantic_role or '',o.value,o.row_count))),
             tuple(sorted(entity_relations[i])),tuple(sorted(neighbors[i])),tuple(sorted(entity_datasets[i])))
             for i,e in entities.items()}
-        return InvestigationContext(entity_contexts,dataset_contexts,relations,findings,evidence)
+        return InvestigationContext(entity_contexts,dataset_contexts,relations,findings,evidence,analysis_index)
