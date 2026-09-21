@@ -10,6 +10,7 @@ from cyber_analyst.correlation.planner import CorrelationPlan
 from cyber_analyst.correlation.execution import CorrelationExecutionResult
 from cyber_analyst.findings.models import FindingResult
 from cyber_analyst.entities.models import EntityResult
+from cyber_analyst.relations.models import RelationResult
 
 
 class InvestigationPipelineError(Exception):
@@ -36,5 +37,6 @@ class InvestigationResult:
     correlation_plan: CorrelationPlan
     correlation_execution: CorrelationExecutionResult
     entities: EntityResult
+    relations: RelationResult
     # None only before finding generation; successful pipeline results always include it.
     findings: FindingResult | None = None
