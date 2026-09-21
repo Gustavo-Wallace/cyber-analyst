@@ -26,17 +26,30 @@ def _known(value, allowed, label):
 
 
 @dataclass(frozen=True)
+class AnalysisRef:
+    dataset_name: str
+    analysis_id: str
+
+    def __post_init__(self):
+        if any(not isinstance(v,str) or not v for v in (self.dataset_name,self.analysis_id)):
+            raise StateError('Analysis reference requires dataset and analysis IDs')
+
+
+@dataclass(frozen=True)
 class InvestigationFocus:
     entity_id: str | None = None
     dataset_name: str | None = None
     finding_id: str | None = None
+    analysis: AnalysisRef | None = None
 
     def __post_init__(self):
         values = (self.entity_id, self.dataset_name, self.finding_id)
-        if sum(v is not None for v in values) > 1:
+        if sum(v is not None for v in (*values,self.analysis)) > 1:
             raise StateError('Focus allows at most one object')
         if any(v is not None and not isinstance(v, str) for v in values):
             raise StateError('Focus references must be strings')
+        if self.analysis is not None and not isinstance(self.analysis,AnalysisRef):
+            raise StateError('Expected AnalysisRef')
 
 
 @dataclass(frozen=True)
@@ -70,6 +83,14 @@ class StateService:
     def focus_finding(self, state, context, finding_id):
         _known(finding_id, context.findings, 'finding')
         return replace(state, focus=InvestigationFocus(finding_id=finding_id))
+
+    def focus_analysis(self, state, context, dataset_name, analysis_id):
+        reference = AnalysisRef(dataset_name, analysis_id)
+        _known(dataset_name, context.datasets, 'dataset')
+        if ((dataset_name,analysis_id) not in context.analyses or
+                analysis_id not in context.datasets[dataset_name].analysis_result_ids):
+            raise StateError(f'Unknown analysis: {(dataset_name,analysis_id)!r}')
+        return replace(state,focus=InvestigationFocus(analysis=reference))
 
     def clear_focus(self, state):
         return replace(state, focus=InvestigationFocus())

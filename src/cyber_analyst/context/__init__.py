@@ -14,3 +14,8 @@ __all__ += ["InvestigationView", "ViewService"]
 from .search import SearchResult, SearchResults, SearchService, SearchError
 
 __all__ += ["SearchResult", "SearchResults", "SearchService", "SearchError"]
+
+from .state import AnalysisRef
+from .navigation import NavigationService, NavigationError
+
+__all__ += ["AnalysisRef", "NavigationService", "NavigationError"]

@@ -35,6 +35,8 @@ class ViewService:
             validator.focus_dataset(state,context,focus.dataset_name)
         if focus.finding_id is not None:
             validator.focus_finding(state,context,focus.finding_id)
+        if focus.analysis is not None:
+            validator.focus_analysis(state,context,focus.analysis.dataset_name,focus.analysis.analysis_id)
         names = state.dataset_scope or tuple(context.datasets)
         entities,relations,findings,analyses = set(),set(),set(),set()
         for name in names:
