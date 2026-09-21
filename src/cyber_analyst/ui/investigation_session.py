@@ -1,6 +1,7 @@
 """UI session orchestration; all querying remains in domain services."""
 from PySide6.QtCore import QObject, Signal
 from cyber_analyst.context import ContextService, StateService, ViewService, SearchService, NavigationService
+from cyber_analyst.findings.service import ATTENTION_LEVELS
 
 
 class InvestigationSession(QObject):
@@ -41,3 +42,30 @@ class InvestigationSession(QObject):
     def clear_focus(self):
         if self.state is not None:
             self.set_state(StateService().clear_focus(self.state))
+
+    @property
+    def filter_options(self):
+        if self.context is None:
+            return ((), (), ())
+        return (
+            tuple(sorted(self.context.datasets)),
+            tuple(sorted({entity.entity_type for entity in self.context.entities.values()})),
+            tuple(sorted(ATTENTION_LEVELS)),
+        )
+
+    def _require_state(self):
+        if self.state is None:
+            raise ValueError('No investigation loaded')
+        return self.state
+
+    def set_dataset_scope(self, names):
+        self.set_state(StateService().set_dataset_scope(self._require_state(), self.context, names))
+
+    def set_entity_types(self, types):
+        self.set_state(StateService().set_entity_types(self._require_state(), self.context, types))
+
+    def set_attention_levels(self, levels):
+        self.set_state(StateService().set_attention_levels(self._require_state(), levels))
+
+    def clear_filters(self):
+        self.set_state(StateService().clear_filters(self._require_state()))

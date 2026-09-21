@@ -115,6 +115,7 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.context_dock], [210], Qt.Orientation.Horizontal)
 
         self.investigation_session = InvestigationSession(self)
+        self.workspace.filters.bind(self.investigation_session)
         self.investigation_session.changed.connect(self._investigation_changed)
         self.workspace.search.textChanged.connect(self._search_investigation)
         self.workspace.search_results.itemActivated.connect(self._navigate_search_item)

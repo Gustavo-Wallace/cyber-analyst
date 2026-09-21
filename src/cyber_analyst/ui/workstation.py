@@ -1,5 +1,6 @@
 """Native workstation framing; no investigation service bindings."""
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QListWidget, QListWidgetItem, QPlainTextEdit
+from .investigation_filters import InvestigationFilters
 
 
 class Workspace(QWidget):
@@ -20,10 +21,8 @@ class Workspace(QWidget):
         self.search_results.setMaximumHeight(180)
         self.search_results.hide()
         layout.addWidget(self.search_results)
-        toolbar=QLabel('Investigation context | Filters will be available here')
-        toolbar.setWordWrap(True)
-        toolbar.setObjectName('contextToolbar')
-        layout.addWidget(toolbar)
+        self.filters = InvestigationFilters()
+        layout.addWidget(self.filters)
         scroll=QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setMinimumSize(0,0)
