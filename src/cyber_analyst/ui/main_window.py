@@ -24,6 +24,7 @@ from cyber_analyst.ui.correlations_page import CorrelationsPage
 from cyber_analyst.data.dataset_collection import DatasetCollection
 from cyber_analyst.data.session_results import SessionResults
 from cyber_analyst.ui.dashboard_page import DashboardPage
+from cyber_analyst.ui.findings_page import FindingsPage
 
 
 class MainWindow(QMainWindow):
@@ -85,9 +86,11 @@ class MainWindow(QMainWindow):
         self.investigate_page = QTabWidget()
         self.investigate_page.addTab(self.analyses_page, 'Analyses')
         self.investigate_page.addTab(self.correlations_page, 'Correlations')
+        self.investigation_session = InvestigationSession(self)
+        self.findings_page = FindingsPage(self.investigation_session)
         destinations = (
             ('Overview', self.dashboard_page), ('Investigate', self.investigate_page),
-            ('Findings', PlaceholderPage('Findings')), ('Data', self.datasets_page),
+            ('Findings', self.findings_page), ('Data', self.datasets_page),
             ('Relations', PlaceholderPage('Relations')), ('Settings', PlaceholderPage('Settings')))
         for index, (title, page) in enumerate(destinations):
             button = QPushButton(title)
@@ -114,7 +117,6 @@ class MainWindow(QMainWindow):
         self.context_dock.visibilityChanged.connect(self.workspace.inspector_button.setChecked)
         self.resizeDocks([self.context_dock], [210], Qt.Orientation.Horizontal)
 
-        self.investigation_session = InvestigationSession(self)
         self.workspace.filters.bind(self.investigation_session)
         self.investigation_session.changed.connect(self._investigation_changed)
         self.workspace.search.textChanged.connect(self._search_investigation)
