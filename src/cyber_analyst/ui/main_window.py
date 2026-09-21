@@ -2,6 +2,8 @@
 
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QDockWidget,
+    QTabWidget,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -11,6 +13,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from PySide6.QtCore import Qt
+from cyber_analyst.ui.workstation import Workspace, ContextInspector
 from cyber_analyst.ui.pages import PlaceholderPage
 from cyber_analyst.ui.datasets_page import DatasetsPage
 from cyber_analyst.ui.analyses_page import AnalysesPage
@@ -36,10 +40,8 @@ class MainWindow(QMainWindow):
         self.dashboard_page.refresh()
 
     def closeEvent(self, event) -> None:
-        for index in range(self.pages.count()):
-            page = self.pages.widget(index)
-            if isinstance(page, (DatasetsPage, AnalysesPage, CorrelationsPage)):
-                page.shutdown()
+        for page in (self.datasets_page, self.analyses_page, self.correlations_page):
+            page.shutdown()
         super().closeEvent(event)
 
     def __init__(self) -> None:
@@ -56,14 +58,15 @@ class MainWindow(QMainWindow):
 
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(200)
+        sidebar.setMinimumWidth(120)
+        sidebar.setMaximumWidth(180)
         navigation_layout = QVBoxLayout(sidebar)
-        navigation_layout.setContentsMargins(16, 24, 16, 16)
+        navigation_layout.setContentsMargins(8, 12, 8, 8)
         navigation_layout.setSpacing(8)
         brand = QLabel("Cyber Analyst")
         brand.setObjectName("brand")
         navigation_layout.addWidget(brand)
-        navigation_layout.addSpacing(20)
+        navigation_layout.addSpacing(8)
 
         self.navigation = QButtonGroup(self)
         self.navigation.setExclusive(True)
@@ -77,35 +80,47 @@ class MainWindow(QMainWindow):
         self.datasets_page.collection_changed.connect(self._collection_changed)
         self.analyses_page.profile_completed.connect(self._profile_completed)
         self.correlations_page.result_completed.connect(self._correlation_completed)
-        for index, title in enumerate((
-            "Dashboard", "Datasets", "Análises", "Correlações",
-            "AI Analyst", "Workspace", "Configurações",
-        )):
+        self.investigate_page = QTabWidget()
+        self.investigate_page.addTab(self.analyses_page, 'Analyses')
+        self.investigate_page.addTab(self.correlations_page, 'Correlations')
+        destinations = (
+            ('Overview', self.dashboard_page), ('Investigate', self.investigate_page),
+            ('Findings', PlaceholderPage('Findings')), ('Data', self.datasets_page),
+            ('Relations', PlaceholderPage('Relations')), ('Settings', PlaceholderPage('Settings')))
+        for index, (title, page) in enumerate(destinations):
             button = QPushButton(title)
             button.setCheckable(True)
             self.navigation.addButton(button, index)
             navigation_layout.addWidget(button)
-            page = (self.dashboard_page if title == "Dashboard" else
-                    self.datasets_page if title == "Datasets" else
-                    self.analyses_page if title == "Análises" else
-                    self.correlations_page if title == "Correlações" else PlaceholderPage(title))
             self.pages.addWidget(page)
         navigation_layout.addStretch()
         self.navigation.idClicked.connect(self.pages.setCurrentIndex)
         self.navigation.button(0).setChecked(True)
         self.pages.setCurrentIndex(0)
         layout.addWidget(sidebar)
-        layout.addWidget(self.pages, 1)
+        self.workspace = Workspace(self.pages)
+        layout.addWidget(self.workspace, 1)
+        self.context_dock = QDockWidget('Context', self)
+        self.context_dock.setObjectName('contextInspectorDock')
+        self.context_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
+        self.context_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
+        self.context_inspector = ContextInspector()
+        self.context_dock.setWidget(self.context_inspector)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.context_dock)
+        self.workspace.inspector_button.setChecked(True)
+        self.workspace.inspector_button.toggled.connect(self.context_dock.setVisible)
+        self.context_dock.visibilityChanged.connect(self.workspace.inspector_button.setChecked)
+        self.resizeDocks([self.context_dock], [210], Qt.Orientation.Horizontal)
 
         self.setStyleSheet("""
             QMainWindow, QWidget { background-color: #181c1b; color: #dce3df; }
             QWidget#sidebar { background-color: #111513; }
             QLabel { background-color: transparent; }
-            QLabel#brand { color: #80b99a; font-size: 18px; font-weight: 600; }
+            QLabel#brand { color: #80b99a; font-size: 14px; font-weight: 600; }
             QLabel#pageTitle { font-size: 26px; font-weight: 600; }
             QPushButton {
                 background-color: transparent; text-align: left;
-                padding: 9px 12px; border: 1px solid transparent;
+                padding: 6px 8px; border: 1px solid transparent;
                 border-radius: 4px; font-size: 14px;
             }
             QPushButton:hover { background-color: #202b25; }
