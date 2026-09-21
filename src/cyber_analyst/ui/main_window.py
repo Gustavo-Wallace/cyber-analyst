@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QListWidgetItem
+from cyber_analyst.ui.investigation_session import InvestigationSession
 from cyber_analyst.ui.workstation import Workspace, ContextInspector
 from cyber_analyst.ui.pages import PlaceholderPage
 from cyber_analyst.ui.datasets_page import DatasetsPage
@@ -112,6 +114,13 @@ class MainWindow(QMainWindow):
         self.context_dock.visibilityChanged.connect(self.workspace.inspector_button.setChecked)
         self.resizeDocks([self.context_dock], [210], Qt.Orientation.Horizontal)
 
+        self.investigation_session = InvestigationSession(self)
+        self.investigation_session.changed.connect(self._investigation_changed)
+        self.workspace.search.textChanged.connect(self._search_investigation)
+        self.workspace.search_results.itemActivated.connect(self._navigate_search_item)
+        self.workspace.search_results.itemClicked.connect(self._navigate_search_item)
+        self.workspace.search.returnPressed.connect(self._activate_search)
+
         self.setStyleSheet("""
             QMainWindow, QWidget { background-color: #181c1b; color: #dce3df; }
             QWidget#sidebar { background-color: #111513; }
@@ -127,3 +136,47 @@ class MainWindow(QMainWindow):
             QPushButton:checked { background-color: #253d30; color: #9bcbae; }
             QPushButton:focus { border-color: #80b99a; }
         """)
+
+    def set_investigation(self, result):
+        self.investigation_session.load(result)
+
+    def _investigation_changed(self):
+        session=self.investigation_session
+        self.workspace.search_results.clear()
+        self.workspace.search_results.hide()
+        self.workspace.search.setEnabled(session.context is not None)
+        self.workspace.search.setPlaceholderText('Search investigation' if session.context else 'Load an investigation to search')
+        if session.context is None:
+            self.workspace.search.clear()
+        self.context_inspector.render(session.context,session.state)
+
+    def _search_investigation(self, query):
+        results=self.workspace.search_results
+        results.clear()
+        results.hide()
+        if not query.strip() or self.investigation_session.context is None:
+            return
+        try:
+            matches=self.investigation_session.search(query)
+        except ValueError as exc:
+            self.statusBar().showMessage(str(exc),5000)
+            return
+        for match in matches:
+            item=QListWidgetItem(f'{match.kind} | {match.label}'+(f' | {match.dataset_name}' if match.dataset_name else ''))
+            item.setData(Qt.ItemDataRole.UserRole,match)
+            results.addItem(item)
+        results.setVisible(bool(len(matches)))
+        if len(matches): results.setCurrentRow(0)
+
+    def _activate_search(self):
+        item=self.workspace.search_results.currentItem()
+        if item is not None: self._navigate_search_item(item)
+
+    def _navigate_search_item(self, item):
+        result=item.data(Qt.ItemDataRole.UserRole)
+        try:
+            self.investigation_session.navigate(result)
+        except ValueError as exc:
+            self.statusBar().showMessage(str(exc),5000)
+            self.workspace.search_results.clear()
+            self.workspace.search_results.hide()
