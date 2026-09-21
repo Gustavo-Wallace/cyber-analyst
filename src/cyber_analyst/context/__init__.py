@@ -6,3 +6,7 @@ __all__ = ["EntityContext", "DatasetContext", "InvestigationContext", "ContextSe
 from .state import InvestigationFocus, InvestigationState, StateService, StateError
 
 __all__ += ["InvestigationFocus", "InvestigationState", "StateService", "StateError"]
+
+from .view import InvestigationView, ViewService
+
+__all__ += ["InvestigationView", "ViewService"]
