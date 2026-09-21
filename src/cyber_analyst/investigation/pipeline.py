@@ -20,13 +20,14 @@ def _stage(stage, dataset, function, /, *args, **kwargs):
 
 class InvestigationPipeline:
     def __init__(self, *, semantic_service, analysis_planner, analysis_executor,
-                 correlation_planner, correlation_executor, finding_service):
+                 correlation_planner, correlation_executor, finding_service, entity_service):
         self.semantic_service = semantic_service
         self.analysis_planner = analysis_planner
         self.analysis_executor = analysis_executor
         self.correlation_planner = correlation_planner
         self.correlation_executor = correlation_executor
         self.finding_service = finding_service
+        self.entity_service = entity_service
 
     def run(self, datasets: Iterable[Dataset]) -> InvestigationResult:
         try:
@@ -47,6 +48,8 @@ class InvestigationPipeline:
             execution = _stage('analysis_execution', dataset, self.analysis_executor.execute,
                                dataset=dataset, plan=plan)
             results.append(DatasetInvestigationResult(dataset, profile, understanding, plan, execution))
+        entities = _stage('entities', None, self.entity_service.extract,
+                          datasets=datasets, understandings=tuple(r.understanding for r in results))
         if len(datasets) > 1:
             correlation_plan = _stage('correlation_planning', None, self.correlation_planner.plan,
                                       datasets=datasets, understandings=tuple(r.understanding for r in results))
@@ -55,6 +58,6 @@ class InvestigationPipeline:
         else:
             correlation_plan = CorrelationPlan(())
             correlation_execution = CorrelationExecutionResult(())
-        investigation = InvestigationResult(tuple(results), correlation_plan, correlation_execution)
+        investigation = InvestigationResult(tuple(results), correlation_plan, correlation_execution, entities=entities)
         findings = _stage('findings', None, self.finding_service.generate, investigation)
         return replace(investigation, findings=findings)

@@ -10,6 +10,7 @@ from cyber_analyst.correlation.planner import CorrelationPlan
 from cyber_analyst.correlation.execution import CorrelationExecutionResult, CorrelationProposalResult
 from cyber_analyst.investigation.models import InvestigationResult, DatasetInvestigationResult
 from cyber_analyst.ai import AIService
+from cyber_analyst.entities import EntityResult
 
 
 def fixture_investigation():
@@ -23,7 +24,7 @@ def fixture_investigation():
                            (('cvss',5,0,4.3,9.8,7.56,8.1,2.204087112616015),))))
     correlation=CorrelationResult(None,None,'hostname','affected_host',CorrelationSummary(4,5,4,4,4,0,0,5),(),())
     execution=CorrelationExecutionResult((CorrelationProposalResult('hosts','inventory.csv','hostname','vulnerabilities.csv','affected_host',0.9,'not evidence',correlation),))
-    return InvestigationResult(tuple(DatasetInvestigationResult(None,None,None,None,r) for r in (auth,vulnerabilities)),CorrelationPlan(()),execution)
+    return InvestigationResult(tuple(DatasetInvestigationResult(None,None,None,None,r) for r in (auth,vulnerabilities)),CorrelationPlan(()),execution,entities=EntityResult(()))
 
 
 def respond(selected):
@@ -104,7 +105,7 @@ def test_stable_ids_original_objects_no_recomputation(monkeypatch):
 
 def test_empty_catalog_skips_ai():
     ai=Mock()
-    assert FindingService(ai).generate(InvestigationResult((),CorrelationPlan(()),CorrelationExecutionResult(()))).findings==()
+    assert FindingService(ai).generate(InvestigationResult((),CorrelationPlan(()),CorrelationExecutionResult(()),entities=EntityResult(()))).findings==()
     ai.generate_structured.assert_not_called()
 
 
