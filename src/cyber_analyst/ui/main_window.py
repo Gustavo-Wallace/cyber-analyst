@@ -26,6 +26,8 @@ from cyber_analyst.data.session_results import SessionResults
 from cyber_analyst.ui.dashboard_page import DashboardPage
 from cyber_analyst.ui.findings_page import FindingsPage
 from cyber_analyst.ui.relations_page import RelationsPage
+from cyber_analyst.ui.investigation_runner import InvestigationRunner
+from PySide6.QtWidgets import QApplication
 
 
 class MainWindow(QMainWindow):
@@ -34,6 +36,7 @@ class MainWindow(QMainWindow):
         self.analyses_page.refresh_datasets()
         self.correlations_page.refresh_datasets()
         self.dashboard_page.refresh()
+        self._update_run_controls()
 
     def _profile_completed(self, dataset, profile) -> None:
         self.session_results.record_analysis(dataset, profile)
@@ -44,11 +47,16 @@ class MainWindow(QMainWindow):
         self.dashboard_page.refresh()
 
     def closeEvent(self, event) -> None:
+        if self.investigation_runner.running:
+            self._close_pending = True
+            self.statusBar().showMessage('Waiting for investigation to finish before closing')
+            event.ignore()
+            return
         for page in (self.datasets_page, self.analyses_page, self.correlations_page):
             page.shutdown()
         super().closeEvent(event)
 
-    def __init__(self) -> None:
+    def __init__(self, investigation_pipeline=None) -> None:
         super().__init__()
         self.setWindowTitle("Cyber Analyst")
         self.resize(1100, 720)
@@ -106,6 +114,15 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentIndex(0)
         layout.addWidget(sidebar)
         self.workspace = Workspace(self.pages)
+        self._close_pending = False
+        self.investigation_runner = InvestigationRunner(investigation_pipeline, self)
+        self.investigation_runner.changed.connect(self._update_run_controls)
+        self.investigation_runner.succeeded.connect(self._investigation_completed)
+        self.investigation_runner.failed.connect(self._investigation_failed)
+        QApplication.instance().aboutToQuit.connect(self.investigation_runner.shutdown)
+        self.workspace.run_button.clicked.connect(self._run_investigation)
+        self.datasets_page.loading_finished.connect(self._update_run_controls)
+        self._update_run_controls()
         layout.addWidget(self.workspace, 1)
         self.context_dock = QDockWidget('Context', self)
         self.context_dock.setObjectName('contextInspectorDock')
@@ -144,6 +161,39 @@ class MainWindow(QMainWindow):
 
     def set_investigation(self, result):
         self.investigation_session.load(result)
+
+    def _update_run_controls(self):
+        runner = self.investigation_runner
+        available = runner.pipeline is not None
+        self.workspace.run_button.setEnabled(available and bool(len(self.collection)) and not runner.running and not self.datasets_page.is_loading and not self._close_pending)
+        self.workspace.run_button.setToolTip('No investigation pipeline configured' if not available else 'Run on the currently loaded datasets')
+        self.datasets_page.setEnabled(not runner.running)
+        if runner.running:
+            self.workspace.run_status.setText('Running investigation...')
+        elif self._close_pending:
+            self.close()
+
+    def _run_investigation(self):
+        if self.datasets_page.is_loading or self._close_pending:
+            return
+        try:
+            self.investigation_runner.start(self.collection.values())
+        except ValueError as exc:
+            self.statusBar().showMessage(str(exc))
+
+    def _investigation_completed(self, result):
+        try:
+            self.set_investigation(result)
+        except Exception as exc:
+            self._investigation_failed(exc)
+            return
+        self.workspace.run_status.setText('Completed')
+        self.statusBar().showMessage('Investigation completed')
+
+    def _investigation_failed(self, error):
+        self.workspace.run_status.setText('Failed')
+        stage = getattr(error, 'stage', 'result')
+        self.statusBar().showMessage(f'Investigation failed [{stage}]: {error}')
 
     def _investigation_changed(self):
         session=self.investigation_session
