@@ -26,6 +26,7 @@ from cyber_analyst.data.session_results import SessionResults
 from cyber_analyst.ui.dashboard_page import DashboardPage
 from cyber_analyst.ui.findings_page import FindingsPage
 from cyber_analyst.ui.investigation_overview import InvestigationOverview
+from cyber_analyst.ui.investigation_analysis_page import InvestigationAnalysisPage
 from cyber_analyst.ui.relations_page import RelationsPage
 from cyber_analyst.ui.investigation_runner import InvestigationRunner
 from cyber_analyst.ui.settings_page import SettingsPage
@@ -100,13 +101,14 @@ class MainWindow(QMainWindow):
         self.investigate_page.addTab(self.analyses_page, 'Analyses')
         self.investigate_page.addTab(self.correlations_page, 'Correlations')
         self.investigation_session = InvestigationSession(self)
+        self.analysis_explorer = InvestigationAnalysisPage(self.investigation_session, self.investigate_page)
         self.overview_page = InvestigationOverview(self.investigation_session, self.dashboard_page)
         self.findings_page = FindingsPage(self.investigation_session)
         self.relations_page = RelationsPage(self.investigation_session)
         self._owned_pipeline = None
         self.settings_page = SettingsPage(self._apply_runtime_config)
         destinations = (
-            ('Overview', self.overview_page), ('Investigate', self.investigate_page),
+            ('Overview', self.overview_page), ('Investigate', self.analysis_explorer),
             ('Findings', self.findings_page), ('Data', self.datasets_page),
             ('Relations', self.relations_page), ('Settings', self.settings_page))
         for index, (title, page) in enumerate(destinations):
