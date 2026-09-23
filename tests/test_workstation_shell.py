@@ -25,7 +25,8 @@ def test_shell_no_backend_calls_and_inspector(monkeypatch):
         assert not w.workspace.inspector_button.isChecked()
         w.workspace.inspector_button.click();app.processEvents()
         assert w.context_dock.widget() is inspector
-        assert w.pages.widget(0) is w.dashboard_page
+        assert w.pages.widget(0) is w.overview_page
+        assert w.overview_page.currentWidget() is w.dashboard_page
         assert w.pages.widget(3) is w.datasets_page
         assert w.investigate_page.widget(0) is w.analyses_page
         assert w.investigate_page.widget(1) is w.correlations_page

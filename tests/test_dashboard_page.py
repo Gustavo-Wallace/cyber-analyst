@@ -32,7 +32,8 @@ def window(monkeypatch):
 
 def test_empty(window):
     dashboard = window.dashboard_page
-    assert window.pages.currentWidget() is dashboard
+    assert window.pages.currentWidget() is window.overview_page
+    assert window.overview_page.currentWidget() is dashboard
     assert dashboard.empty_label.isVisible()
     assert not dashboard.body.isVisible()
     assert dashboard.dataset_table.rowCount() == 0
