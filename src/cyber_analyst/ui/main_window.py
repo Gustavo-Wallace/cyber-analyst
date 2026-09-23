@@ -27,6 +27,8 @@ from cyber_analyst.ui.dashboard_page import DashboardPage
 from cyber_analyst.ui.findings_page import FindingsPage
 from cyber_analyst.ui.relations_page import RelationsPage
 from cyber_analyst.ui.investigation_runner import InvestigationRunner
+from cyber_analyst.ui.settings_page import SettingsPage
+from cyber_analyst.app.pipeline_factory import create_pipeline
 from PySide6.QtWidgets import QApplication
 
 
@@ -54,6 +56,7 @@ class MainWindow(QMainWindow):
             return
         for page in (self.datasets_page, self.analyses_page, self.correlations_page):
             page.shutdown()
+        self._shutdown_runtime()
         super().closeEvent(event)
 
     def __init__(self, investigation_pipeline=None) -> None:
@@ -98,10 +101,12 @@ class MainWindow(QMainWindow):
         self.investigation_session = InvestigationSession(self)
         self.findings_page = FindingsPage(self.investigation_session)
         self.relations_page = RelationsPage(self.investigation_session)
+        self._owned_pipeline = None
+        self.settings_page = SettingsPage(self._apply_runtime_config)
         destinations = (
             ('Overview', self.dashboard_page), ('Investigate', self.investigate_page),
             ('Findings', self.findings_page), ('Data', self.datasets_page),
-            ('Relations', self.relations_page), ('Settings', PlaceholderPage('Settings')))
+            ('Relations', self.relations_page), ('Settings', self.settings_page))
         for index, (title, page) in enumerate(destinations):
             button = QPushButton(title)
             button.setCheckable(True)
@@ -120,6 +125,7 @@ class MainWindow(QMainWindow):
         self.investigation_runner.succeeded.connect(self._investigation_completed)
         self.investigation_runner.failed.connect(self._investigation_failed)
         QApplication.instance().aboutToQuit.connect(self.investigation_runner.shutdown)
+        QApplication.instance().aboutToQuit.connect(self._shutdown_runtime)
         self.workspace.run_button.clicked.connect(self._run_investigation)
         self.datasets_page.loading_finished.connect(self._update_run_controls)
         self._update_run_controls()
@@ -162,9 +168,23 @@ class MainWindow(QMainWindow):
     def set_investigation(self, result):
         self.investigation_session.load(result)
 
+    def _shutdown_runtime(self):
+        if self._owned_pipeline is not None:
+            self._owned_pipeline.shutdown()
+
+    def _apply_runtime_config(self, config):
+        if self.investigation_runner.running or self._close_pending:
+            raise ValueError('Cannot replace pipeline during an investigation or shutdown')
+        pipeline = create_pipeline(config)
+        self._shutdown_runtime()
+        self._owned_pipeline = pipeline
+        self.investigation_runner.pipeline = pipeline
+        self._update_run_controls()
+
     def _update_run_controls(self):
         runner = self.investigation_runner
         available = runner.pipeline is not None
+        self.settings_page.setEnabled(not runner.running and not self._close_pending)
         self.workspace.run_button.setEnabled(available and bool(len(self.collection)) and not runner.running and not self.datasets_page.is_loading and not self._close_pending)
         self.workspace.run_button.setToolTip('No investigation pipeline configured' if not available else 'Run on the currently loaded datasets')
         self.datasets_page.setEnabled(not runner.running)
