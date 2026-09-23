@@ -88,3 +88,52 @@ def test_analysis_namespace_and_kind_order():
     assert len({(x.dataset_name,x.target_id) for x in analyses})==2
     assert c.analyses[('directory','count')].operation=='column_distribution'
     with pytest.raises(TypeError):c.analyses[('directory','count')]=None
+
+
+def generated_setup():
+    c,v=setup()
+    analyses={(name,'analysis_0123456789abcdef'):replace(step,step_id='analysis_0123456789abcdef') for (name,_),step in c.analyses.items()}
+    findings={'finding_0123456789abcdef':replace(c.findings['f2'],finding_id='finding_0123456789abcdef')}
+    datasets={name:replace(d,analysis_result_ids=('analysis_0123456789abcdef',),finding_ids=('finding_0123456789abcdef',) if name=='remote_access' else ()) for name,d in c.datasets.items()}
+    c=replace(c,analyses=analyses,findings=findings,datasets=datasets)
+    return c,ViewService().build(c,InvestigationState())
+
+
+@pytest.mark.parametrize('query',['ana','analysis','analysis_','find','finding','0123456789a'])
+def test_short_queries_do_not_match_internal_ids(query):
+    c,v=generated_setup()
+    results=SearchService().search(c,v,query)
+    assert not results.by_kind('analysis') and not results.by_kind('finding')
+    if query=='ana':assert [r.target_id for r in results]==['ana','email']
+
+
+@pytest.mark.parametrize('query,kind',[
+    ('analysis_012','analysis'),('analysis_0123456789abcdef','analysis'),
+    ('finding_0123','finding'),('finding_0123456789abcdef','finding')])
+def test_specific_ids_and_navigation(query,kind):
+    from cyber_analyst.context import NavigationService
+    c,v=generated_setup()
+    results=SearchService().search(c,v,query)
+    assert results and all(r.kind==kind for r in results)
+    for r in results:
+        assert r.matched_text==r.target_id
+        state=NavigationService().focus_search_result(InvestigationState(),c,v,r)
+        assert state.focus.analysis is not None if kind=='analysis' else state.focus.finding_id==r.target_id
+    scoped=ViewService().build(c,InvestigationState(dataset_scope=('directory',)))
+    assert all(r.dataset_name=='directory' for r in SearchService().search(c,scoped,query))
+
+
+def test_human_matches_precede_internal_and_report_actual_field():
+    c,v=generated_setup()
+    query='analysis_012'
+    c=replace(c,entities={**c.entities,'ana':replace(c.entities['ana'],canonical_value=query),
+                         'email':replace(c.entities['email'],canonical_value='prefix '+query)})
+    results=SearchService().search(c,v,query)
+    assert [r.kind for r in results]==['entity','entity','analysis','analysis']
+    assert results.results[0].matched_text==query
+    step=c.analyses[('directory','analysis_0123456789abcdef')]
+    c=replace(c,analyses={**c.analyses,('directory',step.step_id):replace(step,title='Inspect '+query)})
+    results=SearchService().search(c,v,query)
+    analysis=results.by_kind('analysis')[0]
+    assert analysis.dataset_name=='directory' and analysis.matched_text=='Inspect '+query
+    assert results==SearchService().search(c,v,query.upper())

@@ -4,6 +4,12 @@ from .models import InvestigationContext
 from .view import InvestigationView
 
 KINDS = ('entity','dataset','finding','analysis')
+MIN_PARTIAL_ID_LENGTH = 12
+
+
+def _matches_internal_id(query: str, identifier: str) -> bool:
+    normalized = identifier.casefold()
+    return query == normalized or (len(query) >= MIN_PARTIAL_ID_LENGTH and query in normalized)
 
 
 class SearchError(ValueError):
@@ -68,13 +74,17 @@ class SearchService:
                     or pair[1] not in context.datasets[pair[0]].analysis_result_ids):
                 raise SearchError('Unknown or out-of-scope analysis')
         matches=[]
-        def add(kind,identifier,label,dataset,texts):
+        def add(kind,identifier,label,dataset,texts,internal_id=None):
             hits=[text for text in texts if query in text.casefold()]
-            if not hits:
+            if hits:
+                matched=min(hits,key=lambda t:(t.casefold()!=query,t.casefold(),t))
+                rank = 0 if matched.casefold() == query else 1
+            elif internal_id is not None and _matches_internal_id(query,internal_id):
+                matched, rank = internal_id, 2
+            else:
                 return
-            matched=min(hits,key=lambda t:(t.casefold()!=query,t.casefold(),t))
             item=SearchResult(kind,identifier,label,dataset,matched)
-            matches.append((matched.casefold()!=query,KINDS.index(kind),label.casefold(),identifier,dataset or '',item))
+            matches.append((rank,KINDS.index(kind),label.casefold(),identifier,dataset or '',item))
         for name in view.dataset_names:
             add('dataset',name,name,name,[name])
         for identifier in view.entity_ids:
@@ -87,9 +97,9 @@ class SearchService:
             evidence=[context.evidence[i] for i in f.evidence_ids]
             sources=sorted({e.dataset_name for e in evidence})
             add('finding',identifier,identifier,sources[0] if len(sources)==1 else None,
-                [identifier,f.attention_level,*[e.operation for e in evidence],*sources])
+                [f.attention_level,*[e.operation for e in evidence],*sources],internal_id=identifier)
         for name,identifier in view.analysis_ids:
             step=context.analyses[(name,identifier)]
             add('analysis',identifier,step.title or identifier,name,
-                [identifier,step.operation,step.title,name,*step.columns])
+                [step.operation,step.title,name,*step.columns],internal_id=identifier)
         return SearchResults(tuple(row[-1] for row in sorted(matches,key=lambda row:row[:-1])[:limit]))
