@@ -25,6 +25,7 @@ from cyber_analyst.data.dataset_collection import DatasetCollection
 from cyber_analyst.data.session_results import SessionResults
 from cyber_analyst.ui.dashboard_page import DashboardPage
 from cyber_analyst.ui.findings_page import FindingsPage
+from cyber_analyst.ui.relations_page import RelationsPage
 
 
 class MainWindow(QMainWindow):
@@ -88,10 +89,11 @@ class MainWindow(QMainWindow):
         self.investigate_page.addTab(self.correlations_page, 'Correlations')
         self.investigation_session = InvestigationSession(self)
         self.findings_page = FindingsPage(self.investigation_session)
+        self.relations_page = RelationsPage(self.investigation_session)
         destinations = (
             ('Overview', self.dashboard_page), ('Investigate', self.investigate_page),
             ('Findings', self.findings_page), ('Data', self.datasets_page),
-            ('Relations', PlaceholderPage('Relations')), ('Settings', PlaceholderPage('Settings')))
+            ('Relations', self.relations_page), ('Settings', PlaceholderPage('Settings')))
         for index, (title, page) in enumerate(destinations):
             button = QPushButton(title)
             button.setCheckable(True)

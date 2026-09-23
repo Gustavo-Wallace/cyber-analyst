@@ -66,4 +66,17 @@ class ContextInspector(QWidget):
             elif f.analysis is not None:
                 a=f.analysis;step=context.analyses[(a.dataset_name,a.analysis_id)]
                 text=f'{a.dataset_name}\n{a.analysis_id}\nOperation: {step.operation}\n{step.title}\nColumns: '+', '.join(step.columns)
+            elif f.relation_id is not None:
+                relation = context.relations[f.relation_id]
+                a = context.entities[relation.entity_a_id]
+                b = context.entities[relation.entity_b_id]
+                label = 'Co-occurrence' if relation.relation_type == 'co_occurrence' else relation.relation_type
+                count = len(relation.occurrences)
+                lines = [label, f'{a.entity_type}: {a.canonical_value}',
+                         f'<-> {b.entity_type}: {b.canonical_value}', '',
+                         f'{count} occurrence' + ('s' if count != 1 else '') + ' | ' +
+                         ', '.join(sorted({o.dataset_name for o in relation.occurrences}))]
+                text = '\n'.join(lines)
+        self.details.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap if context is not None and state is not None and state.focus.relation_id is not None else QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.details.setToolTip(state.focus.relation_id or '' if state is not None else '')
         self.details.setPlainText(text)

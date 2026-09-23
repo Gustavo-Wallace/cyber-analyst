@@ -43,6 +43,12 @@ class InvestigationSession(QObject):
         if self.state is not None:
             self.set_state(StateService().clear_focus(self.state))
 
+    def focus_relation(self, relation_id):
+        state = self._require_state()
+        if relation_id not in self.view.relation_ids:
+            raise ValueError('Stale or hidden relation')
+        self.set_state(StateService().focus_relation(state, self.context, relation_id))
+
     @property
     def filter_options(self):
         if self.context is None:

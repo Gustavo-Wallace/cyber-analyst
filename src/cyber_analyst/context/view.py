@@ -29,6 +29,8 @@ class ViewService:
         validator.set_entity_types(state,context,state.entity_types)
         validator.set_attention_levels(state,state.attention_levels)
         focus = state.focus
+        if focus.relation_id is not None:
+            validator.focus_relation(state,context,focus.relation_id)
         if focus.entity_id is not None:
             validator.focus_entity(state,context,focus.entity_id)
         if focus.dataset_name is not None:
