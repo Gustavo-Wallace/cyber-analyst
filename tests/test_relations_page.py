@@ -27,7 +27,8 @@ def test_relation_focus_validation():
 
 def test_relations_lifecycle_provenance_and_endpoints(window):
     page = window.relations_page
-    assert window.pages.widget(4) is page
+    assert window.pages.widget(4) is window.relations_tabs
+    assert window.relations_tabs.widget(1) is page
     assert page.empty.text().startswith('No active investigation') and page.splitter.isHidden()
     window.set_investigation(synthetic())
     session = window.investigation_session

@@ -29,6 +29,7 @@ from cyber_analyst.ui.investigation_overview import InvestigationOverview
 from cyber_analyst.ui.investigation_analysis_page import InvestigationAnalysisPage
 from cyber_analyst.ui.investigation_correlation_page import InvestigationCorrelationPage
 from cyber_analyst.ui.relations_page import RelationsPage
+from cyber_analyst.ui.investigation_entity_page import InvestigationEntityPage
 from cyber_analyst.ui.investigation_runner import InvestigationRunner
 from cyber_analyst.ui.settings_page import SettingsPage
 from cyber_analyst.app.pipeline_factory import create_pipeline
@@ -111,12 +112,17 @@ class MainWindow(QMainWindow):
         self.overview_page = InvestigationOverview(self.investigation_session, self.dashboard_page)
         self.findings_page = FindingsPage(self.investigation_session)
         self.relations_page = RelationsPage(self.investigation_session)
+        self.entity_page = InvestigationEntityPage(self.investigation_session)
+        self.relations_tabs = QTabWidget()
+        self.relations_tabs.addTab(self.entity_page, 'Entities')
+        self.relations_tabs.addTab(self.relations_page, 'Relations')
+        self.relations_tabs.setTabVisible(0, False)
         self._owned_pipeline = None
         self.settings_page = SettingsPage(self._apply_runtime_config)
         destinations = (
             ('Overview', self.overview_page), ('Investigate', self.investigation_tabs),
             ('Findings', self.findings_page), ('Data', self.datasets_page),
-            ('Relations', self.relations_page), ('Settings', self.settings_page))
+            ('Relations', self.relations_tabs), ('Settings', self.settings_page))
         for index, (title, page) in enumerate(destinations):
             button = QPushButton(title)
             button.setCheckable(True)
@@ -228,6 +234,7 @@ class MainWindow(QMainWindow):
     def _investigation_changed(self):
         session=self.investigation_session
         self.investigation_tabs.setTabVisible(1, session.context is not None)
+        self.relations_tabs.setTabVisible(0, session.context is not None)
         self.workspace.search_results.clear()
         self.workspace.search_results.hide()
         self.workspace.search.setEnabled(session.context is not None)
