@@ -43,6 +43,12 @@ class InvestigationSession(QObject):
         if self.state is not None:
             self.set_state(StateService().clear_focus(self.state))
 
+    def focus_correlation(self, correlation_id):
+        state = self._require_state()
+        if correlation_id not in self.view.correlation_ids:
+            raise ValueError('Stale or hidden correlation')
+        self.set_state(StateService().focus_correlation(state, self.context, correlation_id))
+
     def focus_relation(self, relation_id):
         state = self._require_state()
         if relation_id not in self.view.relation_ids:

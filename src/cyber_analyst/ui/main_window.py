@@ -27,6 +27,7 @@ from cyber_analyst.ui.dashboard_page import DashboardPage
 from cyber_analyst.ui.findings_page import FindingsPage
 from cyber_analyst.ui.investigation_overview import InvestigationOverview
 from cyber_analyst.ui.investigation_analysis_page import InvestigationAnalysisPage
+from cyber_analyst.ui.investigation_correlation_page import InvestigationCorrelationPage
 from cyber_analyst.ui.relations_page import RelationsPage
 from cyber_analyst.ui.investigation_runner import InvestigationRunner
 from cyber_analyst.ui.settings_page import SettingsPage
@@ -102,13 +103,18 @@ class MainWindow(QMainWindow):
         self.investigate_page.addTab(self.correlations_page, 'Correlations')
         self.investigation_session = InvestigationSession(self)
         self.analysis_explorer = InvestigationAnalysisPage(self.investigation_session, self.investigate_page)
+        self.correlation_explorer = InvestigationCorrelationPage(self.investigation_session)
+        self.investigation_tabs = QTabWidget()
+        self.investigation_tabs.addTab(self.analysis_explorer, 'Analyses')
+        self.investigation_tabs.addTab(self.correlation_explorer, 'Correlations')
+        self.investigation_tabs.setTabVisible(1, False)
         self.overview_page = InvestigationOverview(self.investigation_session, self.dashboard_page)
         self.findings_page = FindingsPage(self.investigation_session)
         self.relations_page = RelationsPage(self.investigation_session)
         self._owned_pipeline = None
         self.settings_page = SettingsPage(self._apply_runtime_config)
         destinations = (
-            ('Overview', self.overview_page), ('Investigate', self.analysis_explorer),
+            ('Overview', self.overview_page), ('Investigate', self.investigation_tabs),
             ('Findings', self.findings_page), ('Data', self.datasets_page),
             ('Relations', self.relations_page), ('Settings', self.settings_page))
         for index, (title, page) in enumerate(destinations):
@@ -221,6 +227,7 @@ class MainWindow(QMainWindow):
 
     def _investigation_changed(self):
         session=self.investigation_session
+        self.investigation_tabs.setTabVisible(1, session.context is not None)
         self.workspace.search_results.clear()
         self.workspace.search_results.hide()
         self.workspace.search.setEnabled(session.context is not None)

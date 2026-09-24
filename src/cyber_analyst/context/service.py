@@ -77,4 +77,11 @@ class ContextService:
                 o.semantic_role is not None,o.semantic_role or '',o.value,o.row_count))),
             tuple(sorted(entity_relations[i])),tuple(sorted(neighbors[i])),tuple(sorted(entity_datasets[i])))
             for i,e in entities.items()}
-        return InvestigationContext(entity_contexts,dataset_contexts,relations,findings,evidence,analysis_index)
+        correlations = _index(result.correlation_execution.results, lambda c:c.proposal_id, 'correlation ID')
+        for item in correlations.values():
+            check_dataset(item.left_dataset)
+            check_dataset(item.right_dataset)
+            raw = item.correlation_result
+            if (raw.dataset_a.name, raw.column_a, raw.dataset_b.name, raw.column_b) != (item.left_dataset, item.left_column, item.right_dataset, item.right_column):
+                raise ContextError('Correlation provenance mismatch')
+        return InvestigationContext(entity_contexts,dataset_contexts,relations,findings,evidence,analysis_index,correlations)

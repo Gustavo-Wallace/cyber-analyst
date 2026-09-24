@@ -73,6 +73,12 @@ class ContextInspector(QWidget):
             elif f.analysis is not None:
                 a=f.analysis;step=context.analyses[(a.dataset_name,a.analysis_id)]
                 text=f'{a.dataset_name}\n{a.analysis_id}\nOperation: {step.operation}\n{step.title}\nColumns: '+', '.join(step.columns)
+            elif f.correlation_id is not None:
+                c = context.correlations[f.correlation_id]
+                m = c.correlation_result.summary
+                text = (f'{c.left_dataset}.{c.left_column}\n<-> {c.right_dataset}.{c.right_column}\n'
+                        f'Common keys: {m.common}\nMatched rows: {m.matched_rows}\n'
+                        f'Left-only keys: {m.only_a}\nRight-only keys: {m.only_b}')
             elif f.relation_id is not None:
                 relation = context.relations[f.relation_id]
                 a = context.entities[relation.entity_a_id]

@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 from cyber_analyst.execution.models import AnalysisStepResult
+from cyber_analyst.correlation.execution import CorrelationProposalResult
 from cyber_analyst.entities.models import EntityOccurrence
 from cyber_analyst.relations.models import Relation
 from cyber_analyst.findings.models import Finding, FindingEvidence
@@ -38,8 +39,10 @@ class InvestigationContext:
 
     analyses: Mapping[tuple[str, str], AnalysisStepResult] = field(default_factory=dict)
 
+    correlations: Mapping[str, CorrelationProposalResult] = field(default_factory=dict)
+
     def __post_init__(self):
-        for name in ('entities','datasets','relations','findings','evidence','analyses'):
+        for name in ('entities','datasets','relations','findings','evidence','analyses','correlations'):
             object.__setattr__(self,name,MappingProxyType(dict(sorted(getattr(self,name).items()))))
 
     def entity(self, entity_id: str) -> EntityContext:

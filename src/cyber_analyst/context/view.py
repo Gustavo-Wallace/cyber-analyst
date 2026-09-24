@@ -13,8 +13,10 @@ class InvestigationView:
     # Step IDs are local to a dataset, so preserve their namespace.
     analysis_ids: tuple[tuple[str, str], ...]
 
+    correlation_ids: tuple[str, ...] = ()
+
     def __post_init__(self):
-        for name in ('dataset_names','entity_ids','relation_ids','finding_ids','analysis_ids'):
+        for name in ('dataset_names','entity_ids','relation_ids','finding_ids','analysis_ids','correlation_ids'):
             values = getattr(self,name)
             if name == 'analysis_ids':
                 values = (tuple(pair) for pair in values)
@@ -29,6 +31,8 @@ class ViewService:
         validator.set_entity_types(state,context,state.entity_types)
         validator.set_attention_levels(state,state.attention_levels)
         focus = state.focus
+        if focus.correlation_id is not None:
+            validator.focus_correlation(state,context,focus.correlation_id)
         if focus.relation_id is not None:
             validator.focus_relation(state,context,focus.relation_id)
         if focus.entity_id is not None:
@@ -53,4 +57,4 @@ class ViewService:
                      and context.relations[i].entity_b_id in entities}
         if state.attention_levels:
             findings = {i for i in findings if context.findings[i].attention_level in state.attention_levels}
-        return InvestigationView(tuple(names),tuple(entities),tuple(relations),tuple(findings),tuple(analyses))
+        return InvestigationView(tuple(names),tuple(entities),tuple(relations),tuple(findings),tuple(analyses),tuple(i for i,c in context.correlations.items() if c.left_dataset in names and c.right_dataset in names))

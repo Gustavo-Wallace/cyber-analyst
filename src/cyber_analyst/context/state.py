@@ -42,9 +42,10 @@ class InvestigationFocus:
     finding_id: str | None = None
     analysis: AnalysisRef | None = None
     relation_id: str | None = None
+    correlation_id: str | None = None
 
     def __post_init__(self):
-        values = (self.entity_id, self.dataset_name, self.finding_id, self.relation_id)
+        values = (self.entity_id, self.dataset_name, self.finding_id, self.relation_id, self.correlation_id)
         if sum(v is not None for v in (*values,self.analysis)) > 1:
             raise StateError('Focus allows at most one object')
         if any(v is not None and not isinstance(v, str) for v in values):
@@ -70,6 +71,10 @@ class InvestigationState:
 
 
 class StateService:
+    def focus_correlation(self, state, context, correlation_id):
+        _known(correlation_id, context.correlations, 'correlation')
+        return replace(state, focus=InvestigationFocus(correlation_id=correlation_id))
+
     def focus_relation(self, state, context, relation_id):
         _known(relation_id, context.relations, 'relation')
         return replace(state, focus=InvestigationFocus(relation_id=relation_id))
