@@ -35,3 +35,41 @@ class AnalystContext:
 
     def to_json(self):
         return json.dumps(self.to_dict(), ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+MAX_QUESTION_CHARS = 2000
+
+@dataclass(frozen=True)
+class AnalystRequest:
+    question: str
+    response_language: str = 'en'
+    scope: str = 'visible_investigation'
+
+    def __post_init__(self):
+        if not isinstance(self.question, str) or not self.question.strip():
+            raise ValueError('Question must not be blank')
+        if len(self.question) > MAX_QUESTION_CHARS:
+            raise ValueError('Question exceeds 2000 characters')
+        if self.scope not in ('visible_investigation', 'current_focus'):
+            raise ValueError('Invalid analyst scope')
+        if self.response_language not in ('pt-BR', 'en'):
+            raise ValueError('Supported languages: pt-BR, en')
+
+@dataclass(frozen=True, order=True)
+class AnalystReference:
+    kind: str
+    target_id: str
+    dataset_name: str | None = None
+
+@dataclass(frozen=True)
+class AnalystObservation:
+    text: str
+    references: tuple[AnalystReference, ...]
+    fact_ids: tuple[str, ...] = ()
+
+@dataclass(frozen=True)
+class AnalystResponse:
+    status: str
+    summary: str
+    observations: tuple[AnalystObservation, ...]
+    limitations: tuple[str, ...]
