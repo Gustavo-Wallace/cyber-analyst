@@ -7,6 +7,10 @@ from .compiler import compile_evidence
 from .facts import encode
 from .composer import compose, validate_plan, LIMITATIONS
 from .prompt import messages
+from dataclasses import replace
+from .retrieval import retrieve, ToolDiagnostics, visible_evidence
+from .context import AnalystContextBuilder
+from .relevance import explicit_subject, guarded_selection
 
 
 class AnalystResponseError(AIError):
@@ -44,6 +48,7 @@ class AnalystService:
     def __init__(self, ai_service):
         self.ai_service = ai_service
         self.last_diagnostics = {}
+        self.tool_diagnostics = ToolDiagnostics()
 
     def _stage(self, name, prompt, schema, validate):
         diagnostic = {'domain_retries': 0, 'attempts': []}
@@ -69,21 +74,58 @@ class AnalystService:
             else:
                 return result
 
-    def answer(self, request, context):
+    def answer(self, request, context, *, investigation_context=None, state=None, view=None):
         self.last_diagnostics = {}
+        self.tool_diagnostics = ToolDiagnostics()
         if not isinstance(request, AnalystRequest):
             raise ValueError('Expected AnalystRequest')
         if len(context.to_json().encode('utf-8')) > MAX_CONTEXT_BYTES:
             raise ValueError('AnalystContext exceeds the committed byte budget')
+        def insufficient():
+            self.tool_diagnostics = replace(self.tool_diagnostics, final_stage_a='insufficient')
+            summary = ('O contexto fornecido n\u00e3o sustenta uma resposta a esta pergunta.'
+                       if request.response_language == 'pt-BR' else 'The supplied context does not support an answer to this question.')
+            return AnalystResponse('insufficient_context', summary, (), ())
+
+        subject = None
+        bindings = (investigation_context, state, view)
+        if any(b is not None for b in bindings):
+            if any(b is None for b in bindings):
+                raise ValueError('Tool assistance requires context, state and view together')
+            if AnalystContextBuilder().build(*bindings) != context:
+                raise ValueError('AnalystContext does not match current context/state/view')
+            focus = context.data['focus']
+            if request.scope == 'current_focus' and not focus['visible']:
+                return insufficient()
+            subject = explicit_subject(request.question, investigation_context, view)
+            if subject is not None and not subject.visible:
+                return insufficient()
         packet = compile_evidence(context, request.scope)
+        if investigation_context is not None:
+            packet = visible_evidence(packet, view)
         by_alias = {item.alias: item for item in packet.items}
         self.last_diagnostics.update(evidence_bytes=packet.serialized_bytes, evidence_count=len(packet.items),
                                      evidence_truncated=len(packet.items) < packet.total_count)
         selection = self._stage('selection', messages(request, packet.to_dict()), selection_schema(by_alias), lambda result: None)
+        guarded = guarded_selection(selection, by_alias, subject)
+        self.last_diagnostics['selection']['subject_rejected'] = guarded != selection
+        selection = guarded
+        if selection['status'] == 'insufficient' and investigation_context is not None:
+            def publish(diagnostic):
+                self.tool_diagnostics = diagnostic
+            packet, self.tool_diagnostics = retrieve(
+                self._stage, request, context, packet, *bindings, publish)
+            if self.tool_diagnostics.used_tools:
+                by_alias = {item.alias: item for item in packet.items}
+                selection = self._stage('post_tool_selection', messages(request, packet.to_dict()),
+                                        selection_schema(by_alias), lambda result: None)
+        guarded = guarded_selection(selection, by_alias, subject)
+        if 'post_tool_selection' in self.last_diagnostics:
+            self.last_diagnostics['post_tool_selection']['subject_rejected'] = guarded != selection
+        selection = guarded
+        self.tool_diagnostics = replace(self.tool_diagnostics, final_stage_a=selection['status'])
         if selection['status'] == 'insufficient':
-            summary = ('O contexto fornecido n\u00e3o sustenta uma resposta a esta pergunta.'
-                       if request.response_language == 'pt-BR' else 'The supplied context does not support an answer to this question.')
-            return AnalystResponse('insufficient_context', summary, (), ())
+            return insufficient()
         selected = tuple(by_alias[a] for a in sorted(selection['fact_aliases']))
         selected_aliases = {item.alias: item for item in selected}
 

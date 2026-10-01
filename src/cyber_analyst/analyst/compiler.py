@@ -40,7 +40,8 @@ class EvidencePacket:
         return len(encode(self.to_dict()).encode('utf-8'))
 
 
-def compile_evidence(context, scope):
+def compile_evidence(context, scope, *, max_facts=MAX_MODEL_FACTS,
+                     max_bytes=MAX_MODEL_EVIDENCE_BYTES):
     """Aliases identify typed bundles; every value retains its original fact mapping."""
     focus = context.to_dict()['data']['focus']
     facts = fact_registry(context, scope)
@@ -127,12 +128,12 @@ def compile_evidence(context, scope):
     candidates.sort(key=lambda pair: not pair[0]['is_focus'])  # stable within priority
     selected = []
     for item, supporting in candidates:
-        if len(selected) == MAX_MODEL_FACTS:
+        if len(selected) == max_facts:
             break
         if _SHA.search(encode(item)):
             continue
         candidate = CompiledEvidence(f'F{len(selected) + 1:02d}', encode(item), supporting)
         proposed = EvidencePacket(scope, (*selected, candidate), len(candidates))
-        if proposed.serialized_bytes <= MAX_MODEL_EVIDENCE_BYTES:
+        if proposed.serialized_bytes <= max_bytes:
             selected.append(candidate)
     return EvidencePacket(scope, tuple(selected), len(candidates))
