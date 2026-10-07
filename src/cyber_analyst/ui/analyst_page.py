@@ -2,13 +2,15 @@
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
-    QComboBox, QScrollArea, QToolButton, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QSizePolicy,
+    QComboBox, QScrollArea, QToolButton, QSizePolicy,
 )
 from cyber_analyst.analyst import AnalystRequest
 from cyber_analyst.ai.models import AIProviderError, AIStructuredOutputError
 from cyber_analyst.ai.runtime import LlamaRuntimeError
 from .analyst_runner import AnalystSnapshot
+from .analyst_references import ReferenceList
+
+REFERENCE_UNAVAILABLE = 'Not available in the current view.'
 
 
 def plain_label(text):
@@ -66,34 +68,46 @@ def reference_label(reference, snapshot):
     return ''
 
 
+def reference_context(reference, snapshot):
+    """Use only metadata already visible in the submission snapshot."""
+    c, v, r = snapshot.context, snapshot.view, reference
+    if r.dataset_name in v.dataset_names:
+        return r.dataset_name
+    if r.kind == 'entity' and r.target_id in v.entity_ids:
+        return ', '.join(n for n in c.entities[r.target_id].dataset_names if n in v.dataset_names)
+    return ''
+
+
 class Exchange(QWidget):
+    reference_requested = Signal(object, object)
+
     def __init__(self, snapshot, parent=None):
         super().__init__(parent)
         self.snapshot = snapshot
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 12)
-        names = ', '.join(snapshot.view.dataset_names)
-        self.snapshot_label = plain_label(f'Investigation {snapshot.investigation_number} | {names} | {snapshot.request.scope}')
+        self.snapshot_label = plain_label('')
+        self.current = True
+        self.mark_current(snapshot.context)
         layout.addWidget(self.snapshot_label)
         layout.addWidget(plain_label('You'))
         self.question = plain_label(snapshot.request.question)
         layout.addWidget(self.question)
         layout.addWidget(plain_label('AI Analyst'))
+        self.result_status = plain_label('Running request')
+        layout.addWidget(self.result_status)
+        self.outcome_status = 'running'
         self.answer = QPlainTextEdit('Running...')
         self.answer.setReadOnly(True)
         self.answer.setMinimumHeight(65)
         self.answer.setMaximumHeight(300)
         layout.addWidget(self.answer)
-        self.references = QTableWidget(0, 4)
-        self.references.setHorizontalHeaderLabels(['Kind', 'Label / value', 'Identity', 'Dataset'])
-        self.references.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.references.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.references.verticalHeader().hide()
-        self.references.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.references.horizontalHeader().setStretchLastSection(True)
-        self.references.setMaximumHeight(160)
-        self.references.hide()
+        self.references = ReferenceList()
+        self.references.activated.connect(lambda reference: self.reference_requested.emit(self, reference))
         layout.addWidget(self.references)
+        self.reference_status = plain_label('')
+        self.reference_status.hide()
+        layout.addWidget(self.reference_status)
         self.limitations = plain_label('')
         self.limitations.hide()
         layout.addWidget(self.limitations)
@@ -113,22 +127,34 @@ class Exchange(QWidget):
         # Exact backend text, without Markdown/HTML interpretation or rewriting.
         self.answer.setPlainText('\n\n'.join((response.summary, *(o.text for o in response.observations))))
         refs = tuple(dict.fromkeys(r for o in response.observations for r in o.references))
-        self.references.setRowCount(len(refs))
-        for row, ref in enumerate(refs):
-            for col, text in enumerate((ref.kind, reference_label(ref, self.snapshot), ref.target_id, ref.dataset_name or '')):
-                item = QTableWidgetItem(text)
-                item.setToolTip(text)
-                self.references.setItem(row, col, item)
-        self.references.setVisible(bool(refs))
-        self.references.setMaximumHeight(min(160, self.references.horizontalHeader().sizeHint().height()
-                                              + self.references.verticalHeader().defaultSectionSize() * len(refs) + 2))
+        self.references.render((ref, reference_label(ref, self.snapshot), reference_context(ref, self.snapshot)) for ref in refs)
+        self.references.set_current(self.current)
+        self.outcome_status = response.status
+        self.result_status.setText('Insufficient context' if response.status == 'insufficient_context' else 'Answered')
+        self.result_status.setStyleSheet('color: #b4bfb9;' if response.status == 'insufficient_context' else 'color: #80b99a;')
         self.limitations.setText('Limitations\n' + '\n'.join(response.limitations) if response.limitations else '')
         self.limitations.setVisible(bool(response.limitations))
         self._diagnostics(outcome.diagnostics)
 
     def render_error(self, error):
+        self.outcome_status = 'error'
+        self.result_status.setText('Execution failed')
+        self.result_status.setStyleSheet('color: #d9ad80;')
         self.answer.setPlainText(error_message(error))
         self._diagnostics(getattr(error, 'diagnostics', ()))
+
+    def mark_current(self, context):
+        self.current = self.snapshot.context is context
+        names = ', '.join(self.snapshot.view.dataset_names)
+        previous = ' | Previous investigation' if not self.current else ''
+        self.snapshot_label.setText(f'Investigation {self.snapshot.investigation_number}{previous} | {names} | {self.snapshot.request.scope}')
+        self.snapshot_label.setStyleSheet('color: #a5afa9;' if self.current else 'color: #d9ad80;')
+        if hasattr(self, 'references'):
+            self.references.set_current(self.current)
+
+    def show_unavailable(self):
+        self.reference_status.setText(REFERENCE_UNAVAILABLE)
+        self.reference_status.show()
 
     def _diagnostics(self, diagnostics):
         self.diagnostics.setPlainText('\n'.join(f'{key}: {value}' for key, value in diagnostics)
@@ -136,6 +162,8 @@ class Exchange(QWidget):
 
 
 class AnalystPage(QWidget):
+    reference_navigated = Signal(object)
+
     def __init__(self, session, runner, parent=None):
         super().__init__(parent)
         self.session, self.runner = session, runner
@@ -144,6 +172,7 @@ class AnalystPage(QWidget):
         self._context = None
         self._investigation_number = 0
         self._blocked = False
+        self._restore_editor_focus = False
         layout = QVBoxLayout(self)
         title = plain_label('AI Analyst')
         title.setObjectName('pageTitle')
@@ -202,6 +231,8 @@ class AnalystPage(QWidget):
             self._context = self.session.context
             if self._context is not None:
                 self._investigation_number += 1
+            for exchange in self.exchanges:
+                exchange.mark_current(self._context)
         self.empty.setVisible(self.session.context is None)
         self.refresh_controls()
 
@@ -229,9 +260,11 @@ class AnalystPage(QWidget):
             snapshot = AnalystSnapshot(request, self.session.context, self.session.state, self.session.view,
                                        self._investigation_number)
             exchange = Exchange(snapshot)
+            exchange.reference_requested.connect(self._navigate_reference)
             self.exchanges.append(exchange)
             self.transcript_layout.insertWidget(self.transcript_layout.count() - 1, exchange)
             self._active_exchange = exchange
+            self._restore_editor_focus = True
             self.runner.start(snapshot)
             self.question.clear()
             QTimer.singleShot(0, self._scroll_to_latest)
@@ -241,14 +274,47 @@ class AnalystPage(QWidget):
     def _succeeded(self, snapshot, result):
         if self._active_exchange is not None and self._active_exchange.snapshot is snapshot:
             self._active_exchange.render(result)
+            self._active_exchange.mark_current(self.session.context)
             self._active_exchange = None
             QTimer.singleShot(0, self._scroll_to_latest)
+            QTimer.singleShot(0, self._restore_question_focus)
 
     def _failed(self, snapshot, error):
         if self._active_exchange is not None and self._active_exchange.snapshot is snapshot:
             self._active_exchange.render_error(error)
+            self._active_exchange.mark_current(self.session.context)
             self._active_exchange = None
             QTimer.singleShot(0, self._scroll_to_latest)
+            QTimer.singleShot(0, self._restore_question_focus)
+
+    def _navigate_reference(self, exchange, reference):
+        if exchange.snapshot.context is not self.session.context:
+            self._reference_unavailable(exchange)
+            return
+        try:
+            self.session.navigate_reference(reference)
+        except ValueError:
+            self._reference_unavailable(exchange)
+            return
+        exchange.reference_status.clear()
+        exchange.reference_status.hide()
+        self.reference_navigated.emit(reference)
+
+    def _reference_unavailable(self, exchange):
+        exchange.show_unavailable()
+        # The QObject context cancels this callback if Clear destroys the exchange.
+        QTimer.singleShot(0, exchange, lambda: self.conversation.ensureWidgetVisible(exchange.reference_status, 0, 10))
+
+    def hideEvent(self, event):
+        if self.runner.running:
+            self._restore_editor_focus = False
+        super().hideEvent(event)
+
+    def _restore_question_focus(self):
+        if (self._restore_editor_focus and self.isVisible() and self.question.isEnabled()
+                and self.window().isActiveWindow()):
+            self.question.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._restore_editor_focus = False
 
     def _scroll_to_latest(self):
         bar = self.conversation.verticalScrollBar()

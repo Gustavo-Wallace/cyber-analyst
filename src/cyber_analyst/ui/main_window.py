@@ -122,6 +122,7 @@ class MainWindow(QMainWindow):
         self._owned_pipeline = None
         self.analyst_runner = AnalystRunner(analyst_pipeline, self)
         self.analyst_page = AnalystPage(self.investigation_session, self.analyst_runner)
+        self.analyst_page.reference_navigated.connect(self._open_analyst_reference)
         self.settings_page = SettingsPage(self._apply_runtime_config)
         destinations = (
             ('Overview', self.overview_page), ('Investigate', self.investigation_tabs),
@@ -190,6 +191,25 @@ class MainWindow(QMainWindow):
 
     def set_investigation(self, result):
         self.investigation_session.load(result)
+
+    def _open_analyst_reference(self, reference):
+        """Reveal an already authorized/focused object; never change filters."""
+        destination = {'entity': 4, 'relation': 4, 'finding': 2,
+                       'analysis': 1, 'correlation': 1, 'dataset': 0}[reference.kind]
+        if reference.kind in ('entity', 'relation'):
+            self.relations_tabs.setCurrentIndex(0 if reference.kind == 'entity' else 1)
+        elif reference.kind in ('analysis', 'correlation'):
+            self.investigation_tabs.setCurrentIndex(0 if reference.kind == 'analysis' else 1)
+        self.navigation.button(destination).click()
+        if reference.kind == 'dataset':
+            # Overview shows the active investigation's datasets, unlike the legacy
+            # Data collection which may have changed independently of this result.
+            table = self.overview_page.coverage
+            for row in range(table.rowCount()):
+                if table.item(row, 0).text() == reference.target_id:
+                    table.selectRow(row)
+                    table.scrollToItem(table.item(row, 0))
+                    break
 
     def _shutdown_runtime(self):
         if self._owned_pipeline is not None:

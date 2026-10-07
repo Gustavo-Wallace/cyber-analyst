@@ -1,6 +1,7 @@
 """UI session orchestration; all querying remains in domain services."""
 from PySide6.QtCore import QObject, Signal
 from cyber_analyst.context import ContextService, StateService, ViewService, SearchService, NavigationService
+from cyber_analyst.context import SearchResult
 from cyber_analyst.findings.service import ATTENTION_LEVELS
 
 
@@ -38,6 +39,19 @@ class InvestigationSession(QObject):
         if self.context is None:
             raise ValueError('No investigation loaded')
         self.set_state(NavigationService().focus_search_result(self.state,self.context,self.view,result))
+
+    def navigate_reference(self, reference):
+        """Adapt Analyst object identities to the existing validated focus APIs."""
+        state = self._require_state()
+        if reference.kind in ('relation', 'correlation'):
+            # Validate current state/context too, rather than trusting cached view IDs.
+            allowed = ViewService().build(self.context, state)
+            if reference.target_id not in getattr(allowed, reference.kind + '_ids'):
+                raise ValueError('Unavailable reference')
+            getattr(self, 'focus_' + reference.kind)(reference.target_id)
+        else:
+            self.navigate(SearchResult(reference.kind, reference.target_id, '',
+                                       reference.dataset_name if reference.kind == 'analysis' else None, ''))
 
     def clear_focus(self):
         if self.state is not None:

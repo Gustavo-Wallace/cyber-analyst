@@ -134,8 +134,11 @@ def test_rendering_exact_plain_text_references_limitations(setup):
     e = page.exchanges[0]
     assert e.answer.toPlainText() == 'Fatos observados <b>dados</b>\n\nana é uma entidade.\nValor preservado.'
     assert e.answer.isReadOnly()
-    assert e.references.rowCount() == 1 and e.references.item(0, 0).text() == 'entity'
-    assert e.references.item(0, 1).text() == 'ana' and e.references.item(0, 2).text() == 'ana'
+    assert len(e.references.items) == 1
+    item = e.references.items[0]
+    assert item.reference == AnalystReference('entity', 'ana')
+    assert item.label.text() == 'entity | ana | directory, remote_access'
+    assert item.identity.text() == item.identity.toolTip() == 'ana'
     assert e.limitations.text() == 'Limitations\nCorrelation does not establish causation.'
     assert not e.diagnostics.isVisible()
     e.diagnostic_button.click()
@@ -170,7 +173,8 @@ def test_insufficient_is_normal_localized_answer(setup):
     wait(app, lambda: not w.analyst_runner.running)
     e = page.exchanges[0]
     assert e.answer.toPlainText() == p.response.summary
-    assert e.references.rowCount() == 0 and not e.limitations.isVisible()
+    assert not e.references.items and not e.limitations.isVisible()
+    assert e.outcome_status == 'insufficient_context' and e.result_status.text() == 'Insufficient context'
     assert page.status.text() == 'Ready'
 
 
@@ -187,6 +191,9 @@ def test_failure_preserves_transcript_and_restores_controls(setup, error):
     wait(app, lambda: not w.analyst_runner.running)
     assert len(page.exchanges) == 2 and page.exchanges[0].answer.toPlainText() == first
     assert page.exchanges[1].answer.toPlainText() != 'Running...'
+    assert page.exchanges[0].result_status.text() == 'Answered'
+    assert page.exchanges[1].result_status.text() == 'Execution failed'
+    assert page.exchanges[1].outcome_status == 'error'
     assert page.question.isEnabled() and page.status.text() == 'Ready'
     assert p.calls[1][0].question == 'Second independent question'
     assert set(p.calls[1][0].__dataclass_fields__) == {'question', 'response_language', 'scope'}
