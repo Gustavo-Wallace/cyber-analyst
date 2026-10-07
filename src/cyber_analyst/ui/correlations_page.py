@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 
 from cyber_analyst.data.dataset_collection import DatasetCollection
 from cyber_analyst.ui.correlation_worker import CorrelationWorker
+from .theme import table_style
 
 
 class CorrelationsPage(QWidget):
@@ -56,7 +57,7 @@ class CorrelationsPage(QWidget):
         self.preview.setMinimumHeight(160)
         self.preview.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.preview.horizontalHeader().setDefaultSectionSize(150)
-        self.preview.setStyleSheet("QHeaderView::section { background-color: #25302a; color: #dce3df; padding: 5px; }")
+        table_style(self.preview)
         layout.addWidget(self.preview, 1)
         self.dataset_a.currentIndexChanged.connect(self._datasets_changed)
         self.dataset_b.currentIndexChanged.connect(self._datasets_changed)

@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from cyber_analyst.data.dataset_collection import DatasetCollection
 from cyber_analyst.data.dataset import Dataset
 from cyber_analyst.ui.csv_worker import CsvWorker
+from .theme import role, table_style
 
 
 class DatasetsPage(QWidget):
@@ -35,9 +36,7 @@ class DatasetsPage(QWidget):
         layout.addWidget(title)
         actions = QHBoxLayout()
         self.add_button = QPushButton("Adicionar CSV")
-        self.add_button.setStyleSheet(
-            "QPushButton { background-color: #253d30; color: #9bcbae; }"
-        )
+        role(self.add_button, 'primary')
         self.add_button.clicked.connect(self.choose_csv)
         actions.addWidget(self.add_button)
         self.remove_button = QPushButton("Remover")
@@ -52,9 +51,6 @@ class DatasetsPage(QWidget):
         self.loading_label.hide()
         layout.addWidget(self.loading_label)
         self.dataset_list = QListWidget()
-        self.dataset_list.setStyleSheet(
-            "QListWidget::item:selected { background-color: #253d30; color: #9bcbae; }"
-        )
         self.dataset_list.setMaximumHeight(110)
         self.dataset_list.hide()
         self.dataset_list.currentRowChanged.connect(self._selection_changed)
@@ -80,10 +76,7 @@ class DatasetsPage(QWidget):
             table.setSortingEnabled(False)
             table.setMinimumHeight(140)
             table.horizontalHeader().setDefaultSectionSize(140)
-            table.setStyleSheet(
-                "QHeaderView::section { background-color: #25302a; color: #dce3df; padding: 5px; }"
-                "QTableWidget { gridline-color: #35443b; }"
-            )
+            table_style(table)
         details_layout.addWidget(self.schema_table)
         details_layout.addWidget(QLabel("Preview — até 100 linhas"))
         details_layout.addWidget(self.preview_table, 1)

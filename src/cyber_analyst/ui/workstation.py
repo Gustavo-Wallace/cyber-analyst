@@ -1,6 +1,65 @@
 """Native workstation framing; no investigation service bindings."""
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QListWidget, QListWidgetItem, QPlainTextEdit, QStackedWidget
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QListWidget, QPlainTextEdit, QStackedWidget, QLayout
 from .investigation_filters import InvestigationFilters
+from .theme import SPACE, role, label
+
+
+class WorkspaceHeader(QWidget):
+    """Shared page identity and local session caption, independent of domain logic."""
+    def __init__(self):
+        super().__init__()
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(SPACE['sm'])
+        self.title = label('Overview', 'page_title')
+        self.description = label('Investigation coverage, attention and connected evidence.', 'caption')
+        self.session_label = label('NO INVESTIGATION', 'badge')
+        self.run_status = label('Ready', 'caption')
+        for widget in (self.title, self.session_label, self.run_status):
+            widget.setWordWrap(False)
+        self.identity = QWidget()
+        row = QHBoxLayout(self.identity)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.session_label)
+        row.addWidget(self.run_status)
+        self.grid.addWidget(self.title, 0, 0)
+        self.grid.addWidget(self.identity, 0, 1)
+        self.grid.addWidget(self.description, 1, 0, 1, 2)
+        self.grid.setColumnStretch(0, 1)
+        self._context = None
+        self._number = 0
+
+    def set_page(self, title):
+        self.title.setText(title)
+        descriptions = {
+            'Overview': 'Investigation coverage, attention and connected evidence.',
+            'Investigate': 'Browse executed analyses and correlations.',
+            'Findings': 'Review selected deterministic evidence and its provenance.',
+            'Data': 'Manage source datasets and inspect their metadata.',
+            'Relations': 'Explore entities and observed co-occurrences.',
+            'AI Analyst': 'Ask grounded questions about the active investigation.',
+            'Settings': 'Configure the local runtime and model.',
+        }
+        self.description.setText(descriptions[title])
+        self._reflow()
+
+    def set_investigation(self, context):
+        if context is not self._context:
+            self._context = context
+            if context is not None:
+                self._number += 1
+        self.session_label.setText(f'INVESTIGATION {self._number:02}' if context is not None else 'NO INVESTIGATION')
+        self.session_label.setToolTip(', '.join(context.datasets) if context is not None else 'No active investigation')
+        self._reflow()
+
+    def _reflow(self):
+        compact = self.width() < max(360, self.title.sizeHint().width() + self.identity.sizeHint().width() + SPACE['sm'])
+        self.grid.addWidget(self.identity, 1 if compact else 0, 0 if compact else 1)
+        self.description.setVisible(not compact)
+
+    def resizeEvent(self, event):
+        self._reflow()
+        super().resizeEvent(event)
 
 
 class WorkspacePages(QStackedWidget):
@@ -26,46 +85,69 @@ class Workspace(QWidget):
     def __init__(self, pages, parent=None):
         super().__init__(parent)
         layout=QVBoxLayout(self)
-        layout.setContentsMargins(8,8,8,8)
-        run_area = QHBoxLayout()
-        self.run_button = QPushButton('Run investigation')
-        self.run_status = QLabel('Ready')
-        run_area.addWidget(self.run_button)
-        run_area.addWidget(self.run_status)
-        run_area.addStretch()
-        layout.addLayout(run_area)
-        commands=QHBoxLayout()
+        role(self, 'canvas')
+        layout.setContentsMargins(SPACE['lg'],SPACE['sm'],SPACE['lg'],SPACE['sm'])
+        layout.setSpacing(SPACE['sm'])
+        self.header = WorkspaceHeader()
+        layout.addWidget(self.header)
+        self.run_button = role(QPushButton('Run investigation'), 'primary')
+        self.run_status = self.header.run_status
+        self.command_panel = role(QWidget(), 'toolbar')
+        command_layout = QVBoxLayout(self.command_panel)
+        command_layout.setContentsMargins(SPACE['md'],SPACE['sm'],SPACE['md'],SPACE['sm'])
+        command_layout.setSpacing(SPACE['sm'])
+        self.commands = QGridLayout()
+        self.commands.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         self.search=search=QLineEdit()
+        search.setMinimumWidth(0)
         search.setPlaceholderText('Load an investigation to search')
         search.setEnabled(False)
-        commands.addWidget(search,1)
-        self.inspector_button=QPushButton('Context')
+        self.inspector_button=role(QPushButton('Context'), 'secondary')
         self.inspector_button.setCheckable(True)
-        commands.addWidget(self.inspector_button)
-        layout.addLayout(commands)
+        command_layout.addLayout(self.commands)
+        self._compact_commands = None
         self.search_results=QListWidget()
         self.search_results.setMaximumHeight(180)
         self.search_results.hide()
-        layout.addWidget(self.search_results)
+        command_layout.addWidget(self.search_results)
         self.filters = InvestigationFilters()
-        layout.addWidget(self.filters)
+        command_layout.addWidget(self.filters)
+        layout.addWidget(self.command_panel)
         scroll=QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setMinimumSize(0,0)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(pages)
         layout.addWidget(scroll,1)
+        self.scroll = scroll
+        self._reflow_commands()
+
+    def _reflow_commands(self):
+        compact = self.width() < 360
+        if compact == self._compact_commands:
+            return
+        for col in range(3): self.commands.setColumnStretch(col, 0)
+        self.commands.addWidget(self.search, 0, 0, 1, 2 if compact else 1)
+        self.commands.addWidget(self.run_button, 1 if compact else 0, 0 if compact else 1)
+        self.commands.addWidget(self.inspector_button, 1 if compact else 0, 1 if compact else 2)
+        self.commands.setColumnStretch(0, 1)
+        self._compact_commands = compact
+
+    def resizeEvent(self, event):
+        self._reflow_commands()
+        super().resizeEvent(event)
 
 
 class ContextInspector(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        role(self, 'inspector')
         self.setMinimumWidth(0)
         layout=QVBoxLayout(self)
-        label=QLabel('Context inspector')
-        label.setWordWrap(True)
-        layout.addWidget(label)
-        self.details=QPlainTextEdit()
+        layout.setContentsMargins(SPACE['md'],SPACE['md'],SPACE['md'],SPACE['md'])
+        heading=label('Context inspector', 'section_title')
+        layout.addWidget(heading)
+        self.details=role(QPlainTextEdit(), 'inspector_details')
         self.details.setReadOnly(True)
         layout.addWidget(self.details)
         self.render(None,None)

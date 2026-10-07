@@ -1,6 +1,7 @@
 """Native reference actions; labels are submission metadata, never previews."""
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QSizePolicy
+from .theme import role
 
 
 class ReferenceItem(QWidget):
@@ -25,8 +26,7 @@ class ReferenceItem(QWidget):
         self.identity.setToolTip(reference.target_id)
         row.addLayout(text, 1)
         self.open_button = QPushButton('Open')
-        self.open_button.setStyleSheet('QPushButton { border: 1px solid #527460; padding: 4px 8px; } '
-                                      'QPushButton:disabled { color: #6f7973; border-color: #35413b; }')
+        role(self.open_button, 'secondary')
         row.addWidget(self.open_button)
         self.open_button.clicked.connect(lambda: self.activated.emit(self.reference))
 

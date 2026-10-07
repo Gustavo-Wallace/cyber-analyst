@@ -124,7 +124,7 @@ def test_combined_filters_focus_search_and_clear(window):
     bar.attention.actions_by_value['high'].trigger()
     assert s.view.entity_ids==('ana','ip') and s.view.relation_ids==('r2',)
     assert s.view.finding_ids==('f2',)
-    assert bar.summary.text()=='1 datasets \u00b7 2 entities \u00b7 1 relations \u00b7 1 findings'
+    assert bar.summary.text()=='1 dataset \u00b7 2 entities \u00b7 1 relation \u00b7 1 finding'
     bar.clear_button.click()
     assert s.state.focus==focus
     assert s.state.dataset_scope==s.state.entity_types==s.state.attention_levels==()

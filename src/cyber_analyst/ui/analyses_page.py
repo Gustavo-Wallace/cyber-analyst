@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 from cyber_analyst.analysis.models import DatasetProfile
 from cyber_analyst.data.dataset_collection import DatasetCollection
 from cyber_analyst.ui.analysis_worker import AnalysisWorker
+from .theme import table_style
 
 
 class AnalysesPage(QWidget):
@@ -61,7 +62,7 @@ class AnalysesPage(QWidget):
             table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
             table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
             table.horizontalHeader().setDefaultSectionSize(120)
-            table.setStyleSheet("QHeaderView::section { background-color: #25302a; color: #dce3df; padding: 5px; }")
+            table_style(table)
         layout.addWidget(self.profile_table, 2)
         layout.addWidget(self.column_label)
         layout.addWidget(self.distribution_table, 1)

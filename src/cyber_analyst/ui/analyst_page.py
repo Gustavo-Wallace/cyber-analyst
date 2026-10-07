@@ -9,6 +9,7 @@ from cyber_analyst.ai.models import AIProviderError, AIStructuredOutputError
 from cyber_analyst.ai.runtime import LlamaRuntimeError
 from .analyst_runner import AnalystSnapshot
 from .analyst_references import ReferenceList
+from .theme import role
 
 REFERENCE_UNAVAILABLE = 'Not available in the current view.'
 
@@ -131,7 +132,7 @@ class Exchange(QWidget):
         self.references.set_current(self.current)
         self.outcome_status = response.status
         self.result_status.setText('Insufficient context' if response.status == 'insufficient_context' else 'Answered')
-        self.result_status.setStyleSheet('color: #b4bfb9;' if response.status == 'insufficient_context' else 'color: #80b99a;')
+        role(self.result_status, 'caption', 'muted' if response.status == 'insufficient_context' else 'success')
         self.limitations.setText('Limitations\n' + '\n'.join(response.limitations) if response.limitations else '')
         self.limitations.setVisible(bool(response.limitations))
         self._diagnostics(outcome.diagnostics)
@@ -139,14 +140,14 @@ class Exchange(QWidget):
     def render_error(self, error):
         self.outcome_status = 'error'
         self.result_status.setText('Execution failed')
-        self.result_status.setStyleSheet('color: #d9ad80;')
+        role(self.result_status, 'caption', 'warning')
         self.answer.setPlainText(error_message(error))
         self._diagnostics(getattr(error, 'diagnostics', ()))
 
     def render_cancelled(self):
         self.outcome_status = 'cancelled'
         self.result_status.setText('Cancelled')
-        self.result_status.setStyleSheet('color: #b4bfb9;')
+        role(self.result_status, 'caption', 'muted')
         self.answer.clear()
         self.answer.hide()
         self.references.hide()
@@ -159,7 +160,7 @@ class Exchange(QWidget):
         names = ', '.join(self.snapshot.view.dataset_names)
         previous = ' | Previous investigation' if not self.current else ''
         self.snapshot_label.setText(f'Investigation {self.snapshot.investigation_number}{previous} | {names} | {self.snapshot.request.scope}')
-        self.snapshot_label.setStyleSheet('color: #a5afa9;' if self.current else 'color: #d9ad80;')
+        role(self.snapshot_label, 'caption', 'muted' if self.current else 'warning')
         if hasattr(self, 'references'):
             self.references.set_current(self.current)
 

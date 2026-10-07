@@ -3,6 +3,7 @@ from PySide6.QtCore import Qt, QSignalBlocker
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QSplitter)
 from cyber_analyst.context import SearchResult
+from .theme import role
 
 
 def _table(headers):
@@ -36,7 +37,6 @@ class RelationsPage(QWidget):
         self.table = _table(['Entity A', 'Type', 'Relation', 'Entity B', 'Type', 'Occurrences'])
         for col in range(6):
             self.table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch if col in (0, 3) else QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setStyleSheet('QTableWidget::item:selected { background: #253d30; color: #dce3df; } QTableWidget::item { border: none; }')
         self.table.horizontalHeader().setMinimumSectionSize(85)
         self.splitter.addWidget(self.table)
         self.panel = QWidget()
@@ -61,7 +61,7 @@ class RelationsPage(QWidget):
             label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             card.addWidget(label)
             self.endpoint_labels.append(label)
-            button.setStyleSheet('QPushButton { border: 1px solid #527460; background: #253d30; padding: 4px 8px; }')
+            role(button, 'secondary')
             card.addWidget(button)
             cards.addLayout(card, 1)
         detail_layout.addWidget(self.endpoint_cards)

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from cyber_analyst.data.dataset_collection import DatasetCollection
 from cyber_analyst.data.session_results import SessionResults
+from .theme import COLORS, SPACE, label as themed_label, role, table_style
 
 
 class DashboardPage(QWidget):
@@ -24,16 +25,25 @@ class DashboardPage(QWidget):
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         content = QWidget()
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(32, 32, 32, 32)
-        layout.setSpacing(18)
+        layout.setContentsMargins(SPACE['lg'], SPACE['lg'], SPACE['lg'], SPACE['lg'])
+        layout.setSpacing(SPACE['lg'])
         scroll.setWidget(content)
         outer.addWidget(scroll)
         title = QLabel("Dashboard")
         title.setObjectName("pageTitle")
         layout.addWidget(title)
-        self.empty_label = QLabel("Nenhum dataset carregado. Acesse Datasets para adicionar um CSV.")
-        self.empty_label.setWordWrap(True)
-        layout.addWidget(self.empty_label)
+        self.empty_panel = QWidget()
+        empty_layout = QVBoxLayout(self.empty_panel)
+        empty_layout.addStretch()
+        self.empty_label = themed_label('No active investigation', 'section_title')
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(self.empty_label)
+        caption = themed_label('Load datasets to begin. Manual session results remain available before an investigation is completed.', 'caption')
+        caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_caption = caption
+        empty_layout.addWidget(caption)
+        empty_layout.addStretch()
+        layout.addWidget(self.empty_panel, 1)
         self.body = QWidget()
         body_layout = QVBoxLayout(self.body)
         body_layout.setContentsMargins(0, 0, 0, 0)
@@ -44,15 +54,14 @@ class DashboardPage(QWidget):
             ("datasets", "Datasets carregados"), ("rows", "Total de linhas"),
             ("columns", "Total de colunas (soma)"), ("largest", "Maior dataset"),
         )):
-            card = QWidget()
-            card.setStyleSheet("background-color: #202b25; border-radius: 5px;")
+            card = role(QWidget(), 'metric')
             card_layout = QVBoxLayout(card)
-            heading = QLabel(label)
+            heading = role(QLabel(label), 'caption')
             heading.setWordWrap(True)
             value = QLabel()
             value.setTextFormat(Qt.TextFormat.PlainText)
             value.setWordWrap(True)
-            value.setStyleSheet("color: #9bcbae; font-size: 18px;")
+            role(value, 'card_value')
             card_layout.addWidget(heading)
             card_layout.addWidget(value)
             cards.addWidget(card, index // 2, index % 2)
@@ -67,7 +76,7 @@ class DashboardPage(QWidget):
         self.dataset_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.dataset_table.setMinimumHeight(180)
         self.dataset_table.horizontalHeader().setDefaultSectionSize(150)
-        self.dataset_table.setStyleSheet("QHeaderView::section { background-color: #25302a; color: #dce3df; padding: 5px; }")
+        table_style(self.dataset_table)
         body_layout.addWidget(self.dataset_table)
         body_layout.addWidget(QLabel("Última análise"))
         self.analysis_label = QLabel()
@@ -79,13 +88,12 @@ class DashboardPage(QWidget):
             label.setTextFormat(Qt.TextFormat.PlainText)
             label.setWordWrap(True)
         layout.addWidget(self.body)
-        layout.addStretch()
         self.refresh()
 
     @Slot()
     def refresh(self) -> None:
         datasets = self.collection.values()
-        self.empty_label.setVisible(not datasets)
+        self.empty_panel.setVisible(not datasets)
         self.body.setVisible(bool(datasets))
         self.dataset_table.setRowCount(len(datasets))
         self.kpis["datasets"].setText(str(len(datasets)))
@@ -123,12 +131,12 @@ class DashboardPage(QWidget):
         chart = QChart()
         chart.setTitle("Linhas por dataset")
         chart.setAnimationOptions(QChart.AnimationOption.NoAnimation)
-        chart.setBackgroundBrush(QColor("#181c1b"))
-        chart.setTitleBrush(QColor("#dce3df"))
+        chart.setBackgroundBrush(QColor(COLORS['canvas']))
+        chart.setTitleBrush(QColor(COLORS['text']))
         chart.legend().hide()
         self.bar_set = QBarSet("Linhas")
-        self.bar_set.setColor(QColor("#80b99a"))
-        self.bar_set.setBorderColor(QColor("#80b99a"))
+        self.bar_set.setColor(QColor(COLORS['cyan']))
+        self.bar_set.setBorderColor(QColor(COLORS['cyan']))
         self.series = QHorizontalBarSeries()
         if datasets:
             self.bar_set.append([float(dataset.row_count) for dataset in datasets])
@@ -142,8 +150,8 @@ class DashboardPage(QWidget):
         values.setTickCount(min(5, maximum + 1))
         values.setLabelFormat("%.0f")
         for axis, alignment in ((self.category_axis, Qt.AlignmentFlag.AlignLeft), (values, Qt.AlignmentFlag.AlignBottom)):
-            axis.setLabelsColor(QColor("#dce3df"))
-            axis.setGridLineColor(QColor("#35443b"))
+            axis.setLabelsColor(QColor(COLORS['secondary']))
+            axis.setGridLineColor(QColor(COLORS['border']))
             chart.addAxis(axis, alignment)
             self.series.attachAxis(axis)
         old = self.chart_view.chart()

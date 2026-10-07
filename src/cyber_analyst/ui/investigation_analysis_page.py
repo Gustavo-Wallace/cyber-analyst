@@ -7,6 +7,7 @@ from PySide6.QtCharts import QChart, QChartView, QBarSeries, QBarSet, QBarCatego
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QStackedWidget, QTableWidget,
     QTableWidgetItem, QAbstractItemView, QHeaderView, QSplitter)
 from cyber_analyst.context import SearchResult
+from .theme import COLORS
 
 
 def text(value):
@@ -165,8 +166,8 @@ class InvestigationAnalysisPage(QStackedWidget):
         series.attachAxis(y)
         y.setRange(min(0, min(row[-1] for row in step.rows)), max(1, max(row[-1] for row in step.rows)))
         chart.legend().hide()
-        chart.setBackgroundBrush(QColor('#181c1b'))
-        for axis in chart.axes(): axis.setLabelsColor(QColor('#dce3df'))
+        chart.setBackgroundBrush(QColor(COLORS['canvas']))
+        for axis in chart.axes(): axis.setLabelsColor(QColor(COLORS['secondary']))
         self.chart_view.show()
 
     def _select(self):

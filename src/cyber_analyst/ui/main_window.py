@@ -35,6 +35,7 @@ from cyber_analyst.ui.analyst_page import AnalystPage
 from cyber_analyst.ui.analyst_runner import AnalystRunner
 from cyber_analyst.app.pipeline_factory import create_pipeline
 from PySide6.QtWidgets import QApplication
+from .theme import SPACE, apply_theme, role, label
 
 
 class MainWindow(QMainWindow):
@@ -87,17 +88,16 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
         self.setCentralWidget(central)
 
-        sidebar = QWidget()
-        sidebar.setObjectName("sidebar")
-        sidebar.setMinimumWidth(120)
-        sidebar.setMaximumWidth(180)
+        self.sidebar = sidebar = role(QWidget(), 'sidebar')
+        sidebar.setMinimumWidth(128)
+        sidebar.setMaximumWidth(168)
         navigation_layout = QVBoxLayout(sidebar)
-        navigation_layout.setContentsMargins(8, 12, 8, 8)
-        navigation_layout.setSpacing(8)
-        brand = QLabel("Cyber Analyst")
-        brand.setObjectName("brand")
+        navigation_layout.setContentsMargins(SPACE['sm'], SPACE['lg'], SPACE['sm'], SPACE['md'])
+        navigation_layout.setSpacing(SPACE['xs'])
+        brand = label('Cyber Analyst', 'section_title', 'cyan')
         navigation_layout.addWidget(brand)
-        navigation_layout.addSpacing(8)
+        navigation_layout.addWidget(label('LOCAL WORKSTATION', 'caption'))
+        navigation_layout.addSpacing(SPACE['lg'])
 
         self.navigation = QButtonGroup(self)
         self.navigation.setExclusive(True)
@@ -142,17 +142,21 @@ class MainWindow(QMainWindow):
             ('Relations', self.relations_tabs), ('Settings', self.settings_page),
             ('AI Analyst', self.analyst_page))
         for index, (title, page) in enumerate(destinations):
-            button = QPushButton(title)
+            button = role(QPushButton(title), 'sidebar_button')
             button.setCheckable(True)
             self.navigation.addButton(button, index)
-            navigation_layout.addWidget(button)
             self.pages.addWidget(page)
+        for index in (0, 1, 2, 3, 4, 6):
+            navigation_layout.addWidget(self.navigation.button(index))
         navigation_layout.addStretch()
+        navigation_layout.addWidget(self.navigation.button(5))
         self.navigation.idClicked.connect(self.pages.setCurrentIndex)
         self.navigation.button(0).setChecked(True)
         self.pages.setCurrentIndex(0)
         layout.addWidget(sidebar)
         self.workspace = Workspace(self.pages)
+        self.pages.currentChanged.connect(lambda index: self.workspace.header.set_page(self.navigation.button(index).text()))
+        self.overview_page.target_requested.connect(self._open_analyst_reference)
         self._close_pending = False
         self._quit_pending = False
         QApplication.instance().installEventFilter(self)
@@ -170,6 +174,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.workspace, 1)
         self.context_dock = QDockWidget('Context', self)
         self.context_dock.setObjectName('contextInspectorDock')
+        self.context_dock.setMinimumWidth(160)
         self.context_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
         self.context_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable)
         self.context_inspector = ContextInspector()
@@ -187,21 +192,11 @@ class MainWindow(QMainWindow):
         self.workspace.search_results.itemClicked.connect(self._navigate_search_item)
         self.workspace.search.returnPressed.connect(self._activate_search)
 
-        self.setStyleSheet("""
-            QMainWindow, QWidget { background-color: #181c1b; color: #dce3df; }
-            QWidget#sidebar { background-color: #111513; }
-            QLabel { background-color: transparent; }
-            QLabel#brand { color: #80b99a; font-size: 14px; font-weight: 600; }
-            QLabel#pageTitle { font-size: 26px; font-weight: 600; }
-            QPushButton {
-                background-color: transparent; text-align: left;
-                padding: 6px 8px; border: 1px solid transparent;
-                border-radius: 4px; font-size: 14px;
-            }
-            QPushButton:hover { background-color: #202b25; }
-            QPushButton:checked { background-color: #253d30; color: #9bcbae; }
-            QPushButton:focus { border-color: #80b99a; }
-        """)
+        # The shared header replaces duplicate page headings; page content/logic stays intact.
+        for heading in self.pages.findChildren(QLabel):
+            if heading.objectName() == 'pageTitle':
+                heading.hide()
+        apply_theme(self)
 
     def set_investigation(self, result):
         self.investigation_session.load(result)
@@ -279,6 +274,7 @@ class MainWindow(QMainWindow):
 
     def _investigation_changed(self):
         session=self.investigation_session
+        self.workspace.header.set_investigation(session.context)
         self.investigation_tabs.setTabVisible(1, session.context is not None)
         self.relations_tabs.setTabVisible(0, session.context is not None)
         self.workspace.search_results.clear()
