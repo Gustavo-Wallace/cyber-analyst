@@ -1,7 +1,8 @@
 """Ciclo de vida síncrono de um llama-server local explicitamente configurado.
 
 Use em background quando houver integração futura com GUI. A instância não é
-thread-safe. start() aguarda prontidão; stop() e context manager garantem cleanup.
+reentrante para start(). stop() pode interromper o startup/inferência de um owner
+exclusivo; o lock protege criação/encerramento do processo.
 """
 
 from enum import StrEnum
@@ -12,6 +13,7 @@ from pathlib import Path
 import socket
 import subprocess
 import time
+from threading import RLock
 
 from cyber_analyst.ai.client import LlamaClientError, LlamaServerClient
 
@@ -50,6 +52,7 @@ class LlamaRuntime:
         self._process = None
         self._state = RuntimeState.STOPPED
         self._base_url = None
+        self._process_lock = RLock()
 
     @property
     def base_url(self) -> str:
@@ -59,7 +62,8 @@ class LlamaRuntime:
 
     @property
     def state(self) -> RuntimeState:
-        if self._process is not None and self._process.poll() is not None:
+        process = self._process
+        if process is not None and process.poll() is not None and process is self._process:
             self._state = RuntimeState.FAILED
         return self._state
 
@@ -69,7 +73,8 @@ class LlamaRuntime:
 
     @property
     def is_alive(self) -> bool:
-        return self._process is not None and self._process.poll() is None
+        process = self._process
+        return process is not None and process.poll() is None
 
     @property
     def is_ready(self) -> bool:
@@ -83,7 +88,7 @@ class LlamaRuntime:
             listener.bind(("127.0.0.1", self.port if self.port is not None else 0))
             return listener.getsockname()[1]
 
-    def start(self) -> None:
+    def start(self, *, cancel_event=None) -> None:
         if self.is_alive:
             raise LlamaRuntimeError("O runtime já possui um processo em execução.")
         if self._process is not None:
@@ -102,16 +107,22 @@ class LlamaRuntime:
             self._base_url = f"http://127.0.0.1:{port}"
             command = [str(executable), "-m", str(model), "--host", "127.0.0.1", "--port", str(port)]
             flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-            self._process = subprocess.Popen(
-                command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL, creationflags=flags,
-            )
+            with self._process_lock:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise LlamaRuntimeError('Runtime startup cancelled.')
+                process = subprocess.Popen(
+                    command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, creationflags=flags,
+                )
+                self._process = process
             # Apenas eventos de ciclo de vida; nunca prompts/respostas ou stdout bruto.
-            logger.info("Runtime iniciado: pid=%s, porta=%s", self._process.pid, port)
+            logger.info("Runtime iniciado: pid=%s, porta=%s", process.pid, port)
             client = LlamaServerClient(self.base_url, timeout=self.request_timeout)
             deadline = time.monotonic() + self.startup_timeout
             while True:
-                code = self._process.poll()
+                if cancel_event is not None and cancel_event.is_set():
+                    raise LlamaRuntimeError('Runtime startup cancelled.')
+                code = process.poll()
                 if code is not None:
                     raise LlamaRuntimeError(f"llama-server encerrou antes de ficar pronto (código {code}).")
                 remaining = deadline - time.monotonic()
@@ -121,11 +132,13 @@ class LlamaRuntime:
                     ready = client.health(timeout=min(self.request_timeout, remaining)) == 200
                 except LlamaClientError:
                     ready = False
-                if self._process.poll() is not None:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise LlamaRuntimeError('Runtime startup cancelled.')
+                if process.poll() is not None:
                     raise LlamaRuntimeError("llama-server encerrou durante o health check.")
                 if ready and time.monotonic() < deadline:
                     self._state = RuntimeState.READY
-                    logger.info("Runtime pronto: pid=%s", self._process.pid)
+                    logger.info("Runtime pronto: pid=%s", process.pid)
                     return
                 time.sleep(min(self.poll_interval, max(0, deadline - time.monotonic())))
         except BaseException as exc:
@@ -139,6 +152,10 @@ class LlamaRuntime:
             raise
 
     def stop(self) -> None:
+        with self._process_lock:
+            self._stop_process()
+
+    def _stop_process(self) -> None:
         process = self._process
         if process is not None:
             try:

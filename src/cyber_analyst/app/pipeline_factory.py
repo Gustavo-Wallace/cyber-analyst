@@ -13,7 +13,9 @@ from cyber_analyst.correlation.execution import CorrelationExecutionService
 from cyber_analyst.findings.service import FindingService
 from cyber_analyst.investigation.pipeline import InvestigationPipeline
 from cyber_analyst.analyst import AnalystService, AnalystContextBuilder
-from .analyst import AnalystRunResult, AnalystRunError, CountingProvider, diagnostics
+from .analyst import AnalystRunResult, AnalystRunError, CountingProvider, diagnostics, AnalystRuntimeOwner
+from cyber_analyst.analyst.cancellation import CancellationToken, AnalystCancelled
+from threading import Lock
 import time
 
 class _RuntimeClient:
@@ -27,6 +29,8 @@ class LocalInvestigationPipeline:
     def __init__(self, config):
         config.validate()
         self.config = config
+        self._execution_lock = Lock()
+        self._analyst_owner = None
         self.runtime = LlamaRuntime(config.llama_executable, config.model_path)
         ai = AIService(LlamaCppProvider(_RuntimeClient(self.runtime)))
         self.ai_service = ai
@@ -38,34 +42,57 @@ class LocalInvestigationPipeline:
             finding_service=FindingService(ai))
 
     def run(self, datasets):
+        if not self._execution_lock.acquire(blocking=False):
+            raise ValueError('The local runtime is already in use')
         try:
             self.runtime.start()
             return self.pipeline.run(datasets)
         finally:
-            self.runtime.stop()
+            try:
+                self.runtime.stop()
+            finally:
+                self._execution_lock.release()
 
     def shutdown(self):
-        self.runtime.stop()
+        if self._analyst_owner is not None:
+            self._analyst_owner.cancellation.cancel()
+        elif self.runtime.has_process:
+            self.runtime.stop()
 
-    def answer(self, request, context, state, view):
+    def answer(self, request, context, state, view, *, cancellation=None):
         """Independent Analyst request using the same configured runtime owner."""
-        provider = CountingProvider(self.ai_service.provider)
+        cancellation = cancellation or CancellationToken()
+        cancellation.check('preparing')
+        if not self._execution_lock.acquire(blocking=False):
+            raise ValueError('The local runtime is already in use')
+        owner = AnalystRuntimeOwner(self.runtime, cancellation)
+        self._analyst_owner = owner
+        provider = CountingProvider(self.ai_service.provider, cancellation)
         ai = AIService(provider, config=self.ai_service.config, retries=self.ai_service.retries)
         service = AnalystService(ai)
         started = time.monotonic()
         try:
             self.config.validate()
             bounded = AnalystContextBuilder().build(context, state, view)
-            self.runtime.start()
+            cancellation.check('runtime_startup')
+            self.runtime.start(cancel_event=cancellation.event)
+            cancellation.check()
             response = service.answer(request, bounded, investigation_context=context,
-                                      state=state, view=view)
+                                      state=state, view=view, cancellation=cancellation)
+            cancellation.check()
             return AnalystRunResult(response, diagnostics(
                 service, provider, self.config.model_path, time.monotonic() - started))
         except Exception as exc:
+            if cancellation.requested:
+                raise AnalystCancelled(cancellation.request_id) from exc
             raise AnalystRunError(exc, diagnostics(
                 service, provider, self.config.model_path, time.monotonic() - started)) from exc
         finally:
-            self.runtime.stop()
+            try:
+                owner.close()
+            finally:
+                self._analyst_owner = None
+                self._execution_lock.release()
 
 def create_pipeline(config):
     return LocalInvestigationPipeline(config)

@@ -32,10 +32,14 @@ class Pipeline:
                                (AnalystReference('entity', 'ana'),), ('fact_stable',)),),
             ('Correlation does not establish causation.',))
 
-    def answer(self, request, context, state, view):
+    def answer(self, request, context, state, view, *, cancellation=None):
         self.calls.append((request, context, state, view, QThread.currentThread()))
-        if not self.release.wait(5):
-            raise RuntimeError('Test release timed out')
+        deadline = time.monotonic() + 5
+        while not self.release.wait(.005):
+            if cancellation is not None:
+                cancellation.check()
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Test release timed out')
         if self.error:
             raise self.error
         return AnalystRunResult(self.response, (('Provider', 'Fake'), ('Provider calls', 2)))
@@ -58,7 +62,9 @@ def setup(monkeypatch):
     yield app, p, w, w.analyst_page
     p.release.set()
     wait(app, lambda: not w.analyst_runner.running)
-    w.close()
+    from shiboken6 import isValid
+    if isValid(w):
+        w.close()
     app.processEvents()
 
 

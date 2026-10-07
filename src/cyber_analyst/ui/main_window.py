@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QEvent
 from PySide6.QtWidgets import QListWidgetItem
 from cyber_analyst.ui.investigation_session import InvestigationSession
 from cyber_analyst.ui.workstation import Workspace, WorkspacePages, ContextInspector
@@ -56,14 +56,24 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if self.investigation_runner.running or self.analyst_runner.running:
             self._close_pending = True
+            self.analyst_runner.cancel()
             self.analyst_page.set_execution_blocked(True)
-            self.statusBar().showMessage('Waiting for the active request to finish before closing')
+            self.statusBar().showMessage('Cancelling Analyst request before closing' if self.analyst_runner.running else
+                                         'Waiting for the investigation to finish before closing')
             event.ignore()
             return
         for page in (self.datasets_page, self.analyses_page, self.correlations_page):
             page.shutdown()
         self._shutdown_runtime()
+        QApplication.instance().removeEventFilter(self)
         super().closeEvent(event)
+
+    def eventFilter(self, watched, event):
+        if event.type() == QEvent.Type.Quit and self.analyst_runner.running:
+            self._quit_pending = True
+            self.analyst_runner.cancel()
+            return True
+        return super().eventFilter(watched, event)
 
     def __init__(self, investigation_pipeline=None, analyst_pipeline=None) -> None:
         super().__init__()
@@ -120,7 +130,9 @@ class MainWindow(QMainWindow):
         self.relations_tabs.addTab(self.relations_page, 'Relations')
         self.relations_tabs.setTabVisible(0, False)
         self._owned_pipeline = None
-        self.analyst_runner = AnalystRunner(analyst_pipeline, self)
+        # A directly destroyed page/window cannot destroy a still-unwinding QThread.
+        self.analyst_runner = AnalystRunner(analyst_pipeline, QApplication.instance())
+        self.destroyed.connect(self.analyst_runner.dispose)
         self.analyst_page = AnalystPage(self.investigation_session, self.analyst_runner)
         self.analyst_page.reference_navigated.connect(self._open_analyst_reference)
         self.settings_page = SettingsPage(self._apply_runtime_config)
@@ -142,6 +154,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(sidebar)
         self.workspace = Workspace(self.pages)
         self._close_pending = False
+        self._quit_pending = False
+        QApplication.instance().installEventFilter(self)
         self.investigation_runner = InvestigationRunner(investigation_pipeline, self)
         self.investigation_runner.changed.connect(self._update_run_controls)
         self.investigation_runner.succeeded.connect(self._investigation_completed)
@@ -236,6 +250,8 @@ class MainWindow(QMainWindow):
         self.datasets_page.setEnabled(not runner.running)
         if runner.running:
             self.workspace.run_status.setText('Running investigation...')
+        elif self._quit_pending and not busy:
+            QApplication.instance().quit()
         elif self._close_pending and not busy:
             self.close()
 

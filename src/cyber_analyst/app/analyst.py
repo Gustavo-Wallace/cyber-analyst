@@ -1,5 +1,6 @@
 """Immutable UI-facing outcomes and compact diagnostics; no transcript memory."""
 from dataclasses import dataclass
+from threading import Lock, Thread
 from cyber_analyst.analyst import AnalystResponse
 
 
@@ -18,17 +19,74 @@ class AnalystRunError(Exception):
 
 class CountingProvider:
     """Delegate identical requests and count calls, without retaining prompts."""
-    def __init__(self, provider):
+    def __init__(self, provider, cancellation=None):
         self.provider = provider
         self.calls = 0
+        self.cancellation = cancellation
+
+    def _call(self, method, *args, **kwargs):
+        if self.cancellation:
+            self.cancellation.check()
+        self.calls += 1
+        try:
+            return getattr(self.provider, method)(*args, **kwargs)
+        finally:
+            if self.cancellation:
+                self.cancellation.check()
 
     def generate_structured(self, *args, **kwargs):
-        self.calls += 1
-        return self.provider.generate_structured(*args, **kwargs)
+        return self._call('generate_structured', *args, **kwargs)
 
     def generate_text(self, *args, **kwargs):
-        self.calls += 1
-        return self.provider.generate_text(*args, **kwargs)
+        return self._call('generate_text', *args, **kwargs)
+
+
+class AnalystRuntimeOwner:
+    """Only this exclusive request lease may stop the adapter's local runtime."""
+    def __init__(self, runtime, cancellation):
+        self.runtime, self.cancellation = runtime, cancellation
+        self._lock = Lock()
+        self._interrupt_lock = Lock()
+        self._stop_thread = None
+        self._closed = False
+        self._stopped = False
+        self.stop_error = None
+        cancellation.set_interrupt(self.interrupt)
+
+    def interrupt(self):
+        # stop() can wait for a process; never perform that wait on the UI thread.
+        with self._interrupt_lock:
+            if not self._closed and self._stop_thread is None:
+                self._stop_thread = Thread(target=self._interrupt_stop, name='Analyst runtime cleanup')
+                self._stop_thread.start()
+
+    def _interrupt_stop(self):
+        try:
+            self.stop()
+        except Exception as exc:
+            self.stop_error = exc  # Retried/propagated by the request worker's finally.
+
+    def stop(self):
+        with self._lock:
+            if not self._stopped:
+                self.runtime.stop()
+                self._stopped = True
+                self.cancellation.runtime_shutdown = True
+                self.stop_error = None
+
+    def close(self):
+        self.cancellation.set_interrupt(None)
+        with self._interrupt_lock:
+            self._closed = True
+            thread = self._stop_thread
+        try:
+            self.stop()
+        except Exception:
+            self.cancellation.runtime_shutdown = False
+            raise
+        finally:
+            if thread is not None:
+                thread.join()
 
 
 def diagnostics(service, provider, model, seconds):

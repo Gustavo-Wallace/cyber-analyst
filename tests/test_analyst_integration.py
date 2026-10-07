@@ -40,7 +40,7 @@ def integration(tmp_path, monkeypatch):
     model.touch()
     pipeline = create_pipeline(RuntimeConfig(exe, model))
     lifecycle = []
-    monkeypatch.setattr(pipeline.runtime, 'start', lambda: lifecycle.append('start'))
+    monkeypatch.setattr(pipeline.runtime, 'start', lambda **kwargs: lifecycle.append('start'))
     monkeypatch.setattr(pipeline.runtime, 'stop', lambda: lifecycle.append('stop'))
     context = ContextService().build(synthetic())
     state = StateService().initial(context)
@@ -117,7 +117,7 @@ def test_provider_exception_chain_and_cleanup_preserved(integration):
 def test_runtime_start_failure_still_cleans_up(integration, monkeypatch):
     pipeline, lifecycle, context, state, view = integration
     original = OSError('runtime unavailable')
-    def fail():
+    def fail(**kwargs):
         lifecycle.append('start')
         raise original
     monkeypatch.setattr(pipeline.runtime, 'start', fail)
@@ -126,3 +126,44 @@ def test_runtime_start_failure_still_cleans_up(integration, monkeypatch):
         pipeline.answer(AnalystRequest('What is recorded?'), context, state, view)
     assert caught.value.original is original and lifecycle == ['start', 'stop']
     assert dict(caught.value.diagnostics)['Provider calls'] == 0
+
+
+def test_adapter_cancel_interrupts_exclusive_runtime_and_wraps_socket_as_cancelled(integration, monkeypatch):
+    from threading import Event, Thread
+    from cyber_analyst.analyst import CancellationToken, AnalystCancelled
+    pipeline, lifecycle, context, state, view = integration
+    entered, stopped = Event(), Event()
+    def stop():
+        lifecycle.append('stop'); stopped.set()
+    monkeypatch.setattr(pipeline.runtime, 'stop', stop)
+    class Blocking:
+        def generate_structured(self, *args):
+            entered.set()
+            assert stopped.wait(3)
+            raise AIProviderError('socket closed') from ConnectionResetError()
+    pipeline.ai_service.provider = Blocking()
+    token = CancellationToken()
+    errors = []
+    def request():
+        try: pipeline.answer(AnalystRequest('What facts are recorded?'), context, state, view, cancellation=token)
+        except Exception as error: errors.append(error)
+    worker = Thread(target=request)
+    worker.start()
+    assert entered.wait(3)
+    # The same configured runtime cannot concurrently be leased to an investigation.
+    with pytest.raises(ValueError, match='already in use'): pipeline.run(())
+    token.cancel()
+    worker.join(3)
+    assert not worker.is_alive() and isinstance(errors[0], AnalystCancelled)
+    assert lifecycle == ['start', 'stop'] and token.runtime_shutdown is True
+    pipeline.shutdown()
+    assert lifecycle == ['start', 'stop']  # No second owner/stop after successful cleanup.
+
+
+def test_pre_cancelled_adapter_request_does_not_start_runtime(integration):
+    from cyber_analyst.analyst import CancellationToken, AnalystCancelled
+    pipeline, lifecycle, context, state, view = integration
+    token = CancellationToken(); token.cancel()
+    with pytest.raises(AnalystCancelled):
+        pipeline.answer(AnalystRequest('What facts are recorded?'), context, state, view, cancellation=token)
+    assert lifecycle == []

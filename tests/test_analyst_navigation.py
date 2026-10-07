@@ -134,7 +134,7 @@ def test_replacement_preserves_history_but_old_identical_ids_cannot_navigate(set
     assert all(not i.open_button.isEnabled() for e in page.exchanges for i in e.references.items)
 
 
-def test_replacement_during_running_request_marks_late_answer_stale(setup):
+def test_replacement_during_running_request_cancels_old_exchange(setup):
     app, provider, w, page = setup
     send(w, page)
     wait(app, lambda: bool(provider.calls))
@@ -142,9 +142,9 @@ def test_replacement_during_running_request_marks_late_answer_stale(setup):
     w.set_investigation(synthetic())
     provider.release.set()
     wait(app, lambda: not w.analyst_runner.running)
-    assert old.outcome_status == 'answered' and not old.current
+    assert old.outcome_status == 'cancelled' and not old.current
     assert 'Previous investigation' in old.snapshot_label.text()
-    assert not old.references.items[0].open_button.isEnabled()
+    assert not old.references.items
 
 
 @pytest.mark.parametrize('reference,filters', [

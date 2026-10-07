@@ -115,12 +115,13 @@ def execute_request(raw, request, analyst_context, context, state, view):
     return InvestigationToolService().execute(tool, context, state, view)
 
 
-def retrieve(stage, request, analyst_context, base, context, state, view, publish):
+def retrieve(stage, request, analyst_context, base, context, state, view, publish, *, check=lambda stage=None: None):
     previous, executions, compiled = [], [], []
     rounds = 0
     cache, requests = {}, []
     packet = base
     for number, limit in enumerate(ROUND_TOOL_LIMITS, 1):
+        check(f'tool_planning_{number}')
         rounds = number
         publish(ToolDiagnostics(bool(executions), rounds, tuple(executions),
                                 packet.serialized_bytes if executions else 0,
@@ -129,10 +130,12 @@ def retrieve(stage, request, analyst_context, base, context, state, view, publis
         plan = stage(f'tool_planning_{number}',
                      planning_messages(request, compact_focus(analyst_context), previous, limit),
                      planning_schema(limit), lambda result: None)
+        check()
         if not plan['requests']:
             publish(ToolDiagnostics(bool(executions), rounds, tuple(executions), requests=tuple(requests)))
             break
         for raw in plan['requests']:
+            check('tool_execution')
             validated = ToolRequest(raw['tool_name'], raw['arguments'])
             key = (id(context), id(view), validated.tool_name, encode(_thaw(validated.arguments)))
             reused = key in cache
@@ -143,6 +146,7 @@ def retrieve(stage, request, analyst_context, base, context, state, view, publis
                 facts = compile_tool_result(result)
                 cache[key] = (result, facts)
                 compiled.append(facts)
+            check()
             record = result.to_dict()
             record_diagnostic = dict(tool_name=record['tool_name'], arguments=record['arguments'],
                                    status=result.status, error_code=result.error_code,

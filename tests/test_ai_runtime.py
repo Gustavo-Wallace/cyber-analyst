@@ -121,3 +121,39 @@ def test_post_ready_death(setup):
 def test_port_selection():
     runtime = LlamaRuntime("unused", "unused.gguf")
     assert 1 <= runtime._select_port() <= 65535
+
+
+def test_cancelled_startup_never_spawns(setup):
+    from threading import Event
+    runtime, _, popen, _ = setup
+    cancel = Event(); cancel.set()
+    with pytest.raises(LlamaRuntimeError, match='cancelled'):
+        runtime.start(cancel_event=cancel)
+    popen.assert_not_called()
+    assert not runtime.has_process
+
+
+def test_cancellation_during_health_check_cleans_spawned_process(setup):
+    from threading import Event
+    runtime, process, _, health = setup
+    cancel = Event()
+    def pending(**kwargs):
+        cancel.set()
+        runtime.stop()
+        return 503
+    health.side_effect = pending
+    with pytest.raises(LlamaRuntimeError, match='cancelled'):
+        runtime.start(cancel_event=cancel)
+    assert not runtime.has_process
+    process.terminate.assert_called_once()
+
+
+def test_concurrent_shutdown_terminates_only_its_process_once(setup):
+    from threading import Thread
+    runtime, process, _, _ = setup
+    runtime.start()
+    workers = [Thread(target=runtime.stop) for _ in range(3)]
+    for worker in workers: worker.start()
+    for worker in workers: worker.join(2); assert not worker.is_alive()
+    process.terminate.assert_called_once()
+    assert not runtime.has_process

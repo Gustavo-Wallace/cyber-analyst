@@ -143,6 +143,17 @@ class Exchange(QWidget):
         self.answer.setPlainText(error_message(error))
         self._diagnostics(getattr(error, 'diagnostics', ()))
 
+    def render_cancelled(self):
+        self.outcome_status = 'cancelled'
+        self.result_status.setText('Cancelled')
+        self.result_status.setStyleSheet('color: #b4bfb9;')
+        self.answer.clear()
+        self.answer.hide()
+        self.references.hide()
+        self.limitations.hide()
+        self.diagnostic_button.hide()
+        self.diagnostics.hide()
+
     def mark_current(self, context):
         self.current = self.snapshot.context is context
         names = ', '.join(self.snapshot.view.dataset_names)
@@ -214,9 +225,12 @@ class AnalystPage(QWidget):
         footer.addWidget(self.status, 1)
         footer.addWidget(self.clear_button)
         self.send_button = QPushButton('Send')
+        self.cancel_button = QPushButton('Cancel')
+        footer.addWidget(self.cancel_button)
         footer.addWidget(self.send_button)
         layout.addLayout(footer)
         self.send_button.clicked.connect(self.submit)
+        self.cancel_button.clicked.connect(runner.cancel)
         self.question.submitted.connect(self.submit)
         self.question.textChanged.connect(self.refresh_controls)
         self.clear_button.clicked.connect(self.clear_conversation)
@@ -224,10 +238,14 @@ class AnalystPage(QWidget):
         runner.changed.connect(self.refresh_controls)
         runner.succeeded.connect(self._succeeded)
         runner.failed.connect(self._failed)
+        runner.cancelled.connect(self._cancelled)
+        self.destroyed.connect(runner.cancel)
         self._session_changed()
 
     def _session_changed(self):
         if self.session.context is not self._context:
+            if self._active_exchange is not None:
+                self.runner.cancel()
             self._context = self.session.context
             if self._context is not None:
                 self._investigation_number += 1
@@ -247,7 +265,10 @@ class AnalystPage(QWidget):
             control.setEnabled(ready)
         self.send_button.setEnabled(ready and bool(self.question.toPlainText().strip()))
         self.clear_button.setEnabled(bool(self.exchanges) and not self.runner.running)
-        self.status.setText('Running Analyst request...' if self.runner.running else
+        cancelling = self.runner.running and self.runner.cancellation.requested
+        self.cancel_button.setVisible(self.runner.running)
+        self.cancel_button.setEnabled(self.runner.running and not cancelling)
+        self.status.setText('Cancelling...' if cancelling else 'Running Analyst request...' if self.runner.running else
                             'No active investigation' if self.session.context is None else
                             'Configure local AI in Settings' if not configured else
                             'Waiting for investigation to finish' if self._blocked else 'Ready')
@@ -273,6 +294,9 @@ class AnalystPage(QWidget):
 
     def _succeeded(self, snapshot, result):
         if self._active_exchange is not None and self._active_exchange.snapshot is snapshot:
+            if snapshot.cancellation.requested:
+                self._cancelled(snapshot, None)
+                return
             self._active_exchange.render(result)
             self._active_exchange.mark_current(self.session.context)
             self._active_exchange = None
@@ -281,7 +305,18 @@ class AnalystPage(QWidget):
 
     def _failed(self, snapshot, error):
         if self._active_exchange is not None and self._active_exchange.snapshot is snapshot:
+            if snapshot.cancellation.requested:
+                self._cancelled(snapshot, None)
+                return
             self._active_exchange.render_error(error)
+            self._active_exchange.mark_current(self.session.context)
+            self._active_exchange = None
+            QTimer.singleShot(0, self._scroll_to_latest)
+            QTimer.singleShot(0, self._restore_question_focus)
+
+    def _cancelled(self, snapshot, outcome):
+        if self._active_exchange is not None and self._active_exchange.snapshot is snapshot:
+            self._active_exchange.render_cancelled()
             self._active_exchange.mark_current(self.session.context)
             self._active_exchange = None
             QTimer.singleShot(0, self._scroll_to_latest)

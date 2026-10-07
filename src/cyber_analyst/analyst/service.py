@@ -49,16 +49,23 @@ class AnalystService:
         self.ai_service = ai_service
         self.last_diagnostics = {}
         self.tool_diagnostics = ToolDiagnostics()
+        self.cancellation = None
+
+    def _check_cancelled(self, stage=None):
+        if self.cancellation is not None:
+            self.cancellation.check(stage)
 
     def _stage(self, name, prompt, schema, validate):
         diagnostic = {'domain_retries': 0, 'attempts': []}
         self.last_diagnostics[name] = diagnostic
         for attempt in range(2):
+            self._check_cancelled(name)
             sizes = {'instructions_bytes': sum(len(m['content'].encode('utf-8')) for m in prompt if m['role'] == 'system'),
                      'schema_bytes': len(encode(schema).encode('utf-8')),
                      'messages_bytes': len(encode(prompt).encode('utf-8'))}
             diagnostic['attempts'].append(sizes)
             result = self.ai_service.generate_structured(prompt, 'analyst_' + name, schema)
+            self._check_cancelled()
             sizes['response'] = result
             try:
                 Draft202012Validator(schema).validate(result)
@@ -74,7 +81,9 @@ class AnalystService:
             else:
                 return result
 
-    def answer(self, request, context, *, investigation_context=None, state=None, view=None):
+    def answer(self, request, context, *, investigation_context=None, state=None, view=None, cancellation=None):
+        self.cancellation = cancellation
+        self._check_cancelled('preparing')
         self.last_diagnostics = {}
         self.tool_diagnostics = ToolDiagnostics()
         if not isinstance(request, AnalystRequest):
@@ -114,7 +123,8 @@ class AnalystService:
             def publish(diagnostic):
                 self.tool_diagnostics = diagnostic
             packet, self.tool_diagnostics = retrieve(
-                self._stage, request, context, packet, *bindings, publish)
+                self._stage, request, context, packet, *bindings, publish, check=self._check_cancelled)
+            self._check_cancelled()
             if self.tool_diagnostics.used_tools:
                 by_alias = {item.alias: item for item in packet.items}
                 selection = self._stage('post_tool_selection', messages(request, packet.to_dict()),
@@ -135,4 +145,5 @@ class AnalystService:
         evidence = {'evidence': [item.to_dict() for item in selected]}
         self.last_diagnostics['synthesis_evidence_bytes'] = len(encode(evidence).encode('utf-8'))
         result = self._stage('synthesis', messages(request, evidence, synthesis=True), response_schema(selected_aliases), validate)
+        self._check_cancelled()
         return compose(result, selected, request.response_language)
