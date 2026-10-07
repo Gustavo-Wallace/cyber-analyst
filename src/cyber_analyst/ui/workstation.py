@@ -1,6 +1,25 @@
 """Native workstation framing; no investigation service bindings."""
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QListWidget, QListWidgetItem, QPlainTextEdit
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QListWidget, QListWidgetItem, QPlainTextEdit, QStackedWidget
 from .investigation_filters import InvestigationFilters
+
+
+class WorkspacePages(QStackedWidget):
+    """Fit the active workspace; hidden pages must not force its scroll size."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.currentChanged.connect(self.updateGeometry)
+
+    def sizeHint(self):
+        page = self.currentWidget()
+        return page.sizeHint() if page else super().sizeHint()
+
+    def minimumSizeHint(self):
+        page = self.currentWidget()
+        return page.minimumSizeHint() if page else super().minimumSizeHint()
+
+    def heightForWidth(self, width):
+        page = self.currentWidget()
+        return page.heightForWidth(width) if page else super().heightForWidth(width)
 
 
 class Workspace(QWidget):

@@ -63,6 +63,7 @@ def test_settings_apply_transactional(config):
         w.settings_page.apply()
         assert w.settings_page.status.text()=='Valid'
         pipeline=w.investigation_runner.pipeline
+        assert w.analyst_runner.pipeline is pipeline
         assert pipeline is not injected and not pipeline.runtime.has_process
         assert w.workspace.run_button.isEnabled()
         w.settings_page.model.setText('missing.gguf');w.settings_page.apply()

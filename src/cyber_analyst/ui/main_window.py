@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -16,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QListWidgetItem
 from cyber_analyst.ui.investigation_session import InvestigationSession
-from cyber_analyst.ui.workstation import Workspace, ContextInspector
+from cyber_analyst.ui.workstation import Workspace, WorkspacePages, ContextInspector
 from cyber_analyst.ui.pages import PlaceholderPage
 from cyber_analyst.ui.datasets_page import DatasetsPage
 from cyber_analyst.ui.analyses_page import AnalysesPage
@@ -32,6 +31,8 @@ from cyber_analyst.ui.relations_page import RelationsPage
 from cyber_analyst.ui.investigation_entity_page import InvestigationEntityPage
 from cyber_analyst.ui.investigation_runner import InvestigationRunner
 from cyber_analyst.ui.settings_page import SettingsPage
+from cyber_analyst.ui.analyst_page import AnalystPage
+from cyber_analyst.ui.analyst_runner import AnalystRunner
 from cyber_analyst.app.pipeline_factory import create_pipeline
 from PySide6.QtWidgets import QApplication
 
@@ -53,9 +54,10 @@ class MainWindow(QMainWindow):
         self.dashboard_page.refresh()
 
     def closeEvent(self, event) -> None:
-        if self.investigation_runner.running:
+        if self.investigation_runner.running or self.analyst_runner.running:
             self._close_pending = True
-            self.statusBar().showMessage('Waiting for investigation to finish before closing')
+            self.analyst_page.set_execution_blocked(True)
+            self.statusBar().showMessage('Waiting for the active request to finish before closing')
             event.ignore()
             return
         for page in (self.datasets_page, self.analyses_page, self.correlations_page):
@@ -63,7 +65,7 @@ class MainWindow(QMainWindow):
         self._shutdown_runtime()
         super().closeEvent(event)
 
-    def __init__(self, investigation_pipeline=None) -> None:
+    def __init__(self, investigation_pipeline=None, analyst_pipeline=None) -> None:
         super().__init__()
         self.setWindowTitle("Cyber Analyst")
         self.resize(1100, 720)
@@ -89,7 +91,7 @@ class MainWindow(QMainWindow):
 
         self.navigation = QButtonGroup(self)
         self.navigation.setExclusive(True)
-        self.pages = QStackedWidget()
+        self.pages = WorkspacePages()
         self.collection = DatasetCollection()
         self.session_results = SessionResults()
         self.dashboard_page = DashboardPage(self.collection, self.session_results)
@@ -118,11 +120,14 @@ class MainWindow(QMainWindow):
         self.relations_tabs.addTab(self.relations_page, 'Relations')
         self.relations_tabs.setTabVisible(0, False)
         self._owned_pipeline = None
+        self.analyst_runner = AnalystRunner(analyst_pipeline, self)
+        self.analyst_page = AnalystPage(self.investigation_session, self.analyst_runner)
         self.settings_page = SettingsPage(self._apply_runtime_config)
         destinations = (
             ('Overview', self.overview_page), ('Investigate', self.investigation_tabs),
             ('Findings', self.findings_page), ('Data', self.datasets_page),
-            ('Relations', self.relations_tabs), ('Settings', self.settings_page))
+            ('Relations', self.relations_tabs), ('Settings', self.settings_page),
+            ('AI Analyst', self.analyst_page))
         for index, (title, page) in enumerate(destinations):
             button = QPushButton(title)
             button.setCheckable(True)
@@ -141,7 +146,9 @@ class MainWindow(QMainWindow):
         self.investigation_runner.succeeded.connect(self._investigation_completed)
         self.investigation_runner.failed.connect(self._investigation_failed)
         QApplication.instance().aboutToQuit.connect(self.investigation_runner.shutdown)
+        QApplication.instance().aboutToQuit.connect(self.analyst_runner.shutdown)
         QApplication.instance().aboutToQuit.connect(self._shutdown_runtime)
+        self.analyst_runner.changed.connect(self._update_run_controls)
         self.workspace.run_button.clicked.connect(self._run_investigation)
         self.datasets_page.loading_finished.connect(self._update_run_controls)
         self._update_run_controls()
@@ -189,28 +196,31 @@ class MainWindow(QMainWindow):
             self._owned_pipeline.shutdown()
 
     def _apply_runtime_config(self, config):
-        if self.investigation_runner.running or self._close_pending:
+        if self.investigation_runner.running or self.analyst_runner.running or self._close_pending:
             raise ValueError('Cannot replace pipeline during an investigation or shutdown')
         pipeline = create_pipeline(config)
         self._shutdown_runtime()
         self._owned_pipeline = pipeline
         self.investigation_runner.pipeline = pipeline
+        self.analyst_runner.pipeline = pipeline
         self._update_run_controls()
 
     def _update_run_controls(self):
         runner = self.investigation_runner
         available = runner.pipeline is not None
-        self.settings_page.setEnabled(not runner.running and not self._close_pending)
-        self.workspace.run_button.setEnabled(available and bool(len(self.collection)) and not runner.running and not self.datasets_page.is_loading and not self._close_pending)
+        busy = runner.running or self.analyst_runner.running
+        self.settings_page.setEnabled(not busy and not self._close_pending)
+        self.analyst_page.set_execution_blocked(runner.running or self._close_pending)
+        self.workspace.run_button.setEnabled(available and bool(len(self.collection)) and not busy and not self.datasets_page.is_loading and not self._close_pending)
         self.workspace.run_button.setToolTip('No investigation pipeline configured' if not available else 'Run on the currently loaded datasets')
         self.datasets_page.setEnabled(not runner.running)
         if runner.running:
             self.workspace.run_status.setText('Running investigation...')
-        elif self._close_pending:
+        elif self._close_pending and not busy:
             self.close()
 
     def _run_investigation(self):
-        if self.datasets_page.is_loading or self._close_pending:
+        if self.datasets_page.is_loading or self.analyst_runner.running or self._close_pending:
             return
         try:
             self.investigation_runner.start(self.collection.values())
