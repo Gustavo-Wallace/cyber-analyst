@@ -168,7 +168,9 @@ class InvestigationAnalysisPage(QStackedWidget):
         y.setRange(min(0, min(row[-1] for row in step.rows)), max(1, max(row[-1] for row in step.rows)))
         chart.legend().hide()
         chart.setBackgroundBrush(QColor(COLORS['canvas']))
-        for axis in chart.axes(): axis.setLabelsColor(QColor(COLORS['secondary']))
+        for axis in chart.axes():
+            axis.setLabelsColor(QColor(COLORS['secondary']))
+            axis.setGridLineColor(QColor(COLORS['border']))
         self.chart_view.show()
 
     def _select(self):
