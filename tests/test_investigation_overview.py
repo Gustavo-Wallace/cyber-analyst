@@ -37,8 +37,8 @@ def test_overview_lifecycle_filters(window):
     s.set_entity_types(['username'])
     assert counts(p)==(1,1,0,1,1,0) and p.entity_chart.counts==( ('username',1),)
     s.set_attention_levels(['high'])
-    assert counts(p)==(1,1,0,0,1,0) and p.attention_chart.counts==()
-    assert not p.attention_chart.empty.isHidden()
+    assert counts(p)==(1,1,0,0,1,0) and p.attention_chart is None
+    assert 'attention' not in p.visual_panels
     s.clear_filters();assert counts(p)==before
     r=synthetic();r=replace(r,findings=replace(r.findings,findings=()))
     window.set_investigation(r);assert counts(p)==(2,3,2,0,2,0)
@@ -54,7 +54,7 @@ def test_provenance_and_empty_entities(window):
     window.investigation_session.set_dataset_scope(['remote_access'])
     window.investigation_session.set_entity_types(['email'])
     assert counts(p)==(1,0,0,1,1,0)
-    assert not p.entity_chart.empty.isHidden()
+    assert p.entity_chart is None
 
 
 def test_group_order_and_minimum(window):
@@ -118,8 +118,8 @@ def test_empty_sections_replacement_and_rendering_does_not_mutate(window):
     window.set_investigation(empty)
     assert counts(p) == (2, 0, 0, 0, 0, 0)
     assert not p.filtered_empty.isHidden()
-    assert not p.attention_chart.empty.isHidden()
-    assert not p.entity_chart.empty.isHidden()
+    assert p.attention_chart is None
+    assert p.entity_chart is None
     assert not p.correlation_highlights.empty.isHidden()
     assert not p.finding_highlights.buttons and not p.entity_highlights.buttons
     s.clear()

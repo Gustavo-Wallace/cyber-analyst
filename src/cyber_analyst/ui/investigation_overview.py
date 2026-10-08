@@ -1,5 +1,4 @@
 """Visible investigation metadata and deterministic navigation, without execution."""
-from collections import Counter
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QGridLayout, QLayout,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QProgressBar, QPushButton, QSizePolicy)
@@ -7,8 +6,9 @@ from cyber_analyst.analyst import AnalystReference
 from .theme import SPACE, label, panel, role, table_style
 from .workstation import WorkspacePages
 from .count_labels import count_label
+from .dashboard_visuals import select_visuals, human_label, ATTENTION_ORDER
+from .chart_factory import VisualPanel
 
-ATTENTION_ORDER = ('high', 'medium', 'low', 'informational')
 
 
 class MetricButton(QPushButton):
@@ -22,10 +22,11 @@ class MetricButton(QPushButton):
 
 class ResponsiveGrid(QWidget):
     """Reflow a few native panels; no fixed desktop widths or hidden controls."""
-    def __init__(self, widgets, minimum_width, maximum_columns):
+    def __init__(self, widgets, minimum_width, maximum_columns, align_top=False):
         super().__init__()
         self.widgets = tuple(widgets)
         self.minimum_width, self.maximum_columns = minimum_width, maximum_columns
+        self.align_top = align_top
         self.columns = 0
         self.grid = QGridLayout(self)
         self.grid.setContentsMargins(0, 0, 0, 0)
@@ -46,7 +47,8 @@ class ResponsiveGrid(QWidget):
         for index in range(self.maximum_columns):
             self.grid.setColumnStretch(index, 0)
         for index, widget in enumerate(self.widgets):
-            self.grid.addWidget(widget, index // columns, index % columns)
+            self.grid.addWidget(widget, index // columns, index % columns,
+                                Qt.AlignmentFlag.AlignTop if self.align_top else Qt.AlignmentFlag(0))
         for index in range(columns):
             self.grid.setColumnStretch(index, 1)
         self.columns = columns
@@ -63,6 +65,15 @@ class ResponsiveGrid(QWidget):
 
     def minimumSizeHint(self):
         return QSize(0, 0)
+
+    def replace_widgets(self, widgets):
+        while self.grid.count():
+            item = self.grid.takeAt(0)
+            item.widget().hide()
+            item.widget().deleteLater()
+        self.widgets = tuple(widgets)
+        self.columns = 0
+        self._reflow()
 
 
 class CountBars(QWidget):
@@ -184,15 +195,17 @@ class InvestigationOverview(WorkspacePages):
         layout.addWidget(self.data_summary)
         self.filtered_empty = label('No results are visible in the current view. Adjust the active filters.', 'caption')
         layout.addWidget(self.filtered_empty)
-        self.attention_chart = CountBars('Alert attention', 'No visible alerts. Adjust filters or review the other investigation objects.',
-                                        'Stored investigation priority, not vulnerability severity.', 'tertiary')
-        self.entity_chart = CountBars('Identifier types', 'No visible identifiers.', 'Distribution of the current investigation view.', 'cyan')
-        layout.addWidget(ResponsiveGrid((self.attention_chart, self.entity_chart), 280, 2))
-        layout.addWidget(label('Investigation highlights', 'section_title'))
+        self.visual_specs = ()
+        self.visual_panels = {}
+        self.visual_grid = ResponsiveGrid((), 410, 3, align_top=True)
+        layout.addWidget(self.visual_grid)
+        self.highlights_heading = label('Investigation highlights', 'section_title')
+        layout.addWidget(self.highlights_heading)
         self.finding_highlights = Highlights('Alerts to review', 'Highest attention first. Up to three shown.', 'No visible alerts to review.')
         self.entity_highlights = Highlights('Connected identifiers', 'Most direct connections first. Up to three shown.', 'No visible identifiers.')
         self.correlation_highlights = Highlights('Dataset matches', 'Most shared keys first. Up to two shown.', 'No visible dataset matches.')
-        layout.addWidget(ResponsiveGrid((self.finding_highlights, self.entity_highlights, self.correlation_highlights), 280, 3))
+        self.highlights_grid = ResponsiveGrid((self.finding_highlights, self.entity_highlights, self.correlation_highlights), 280, 3, align_top=True)
+        layout.addWidget(self.highlights_grid)
         coverage_panel, box = panel('Dataset coverage', 'Visible investigation objects by source dataset. Select a row to inspect its counts.')
         self.coverage = QTableWidget(0, 5)
         self.coverage.setHorizontalHeaderLabels(['Dataset', 'Identifiers', 'Connections', 'Alerts', 'Analysis'])
@@ -217,6 +230,23 @@ class InvestigationOverview(WorkspacePages):
         self.session.navigate_reference(reference)
         self.target_requested.emit(reference)
 
+    def _visual_activate(self, target):
+        context, view = self.session.context, self.session.view
+        if view is None:
+            raise ValueError('No active investigation for this chart')
+        if target.reference is not None:
+            self._activate(target.reference)
+        else:
+            if target.page == 'entities' and target.filter_value:
+                if not any(context.entities[i].entity_type == target.filter_value for i in view.entity_ids):
+                    raise ValueError('Identifier category is no longer visible')
+                self.session.set_entity_types((target.filter_value,))
+            elif target.page == 'findings' and target.filter_value:
+                if not any(context.findings[i].attention_level == target.filter_value for i in view.finding_ids):
+                    raise ValueError('Attention category is no longer visible')
+                self.session.set_attention_levels((target.filter_value,))
+            self.detail_requested.emit(target.page)
+
     def refresh(self):
         context, view = self.session.context, self.session.view
         if context is None:
@@ -233,17 +263,23 @@ class InvestigationOverview(WorkspacePages):
             count_label(sum(d.column_count for d in loaded), 'source column', number_format=',') +
             ' across visible datasets')
         self.filtered_empty.setVisible(not any(collections[1:]))
-        types = Counter(context.entities[i].entity_type for i in view.entity_ids)
-        self.entity_chart.render(sorted(types.items(), key=lambda pair: (-pair[1], pair[0])))
-        attention = Counter(context.findings[i].attention_level for i in view.finding_ids)
-        self.attention_chart.render((level, attention[level]) for level in ATTENTION_ORDER if attention[level])
+        specs = select_visuals(context, view)
+        if specs != self.visual_specs:
+            self.visual_specs = specs
+            self.visual_panels = {spec.key: VisualPanel(spec) for spec in specs}
+            for widget in self.visual_panels.values():
+                widget.activated.connect(self._visual_activate)
+            self.visual_grid.replace_widgets(self.visual_panels.values())
+            self.visual_grid.setVisible(bool(specs))
+        self.entity_chart = self.visual_panels.get('identifier_types')
+        self.attention_chart = self.visual_panels.get('attention')
         finding_rows = []
         for i in sorted(view.finding_ids, key=lambda i: (ATTENTION_ORDER.index(context.findings[i].attention_level), i))[:3]:
             finding = context.findings[i]
             evidence = context.evidence_for(i)
             sources = ', '.join(sorted({e.dataset_name for e in evidence}))
             operations = ', '.join(sorted({e.operation for e in evidence}))
-            finding_rows.append((AnalystReference('finding', i), f'{finding.attention_level.upper()}  |  {operations}\n{sources}', i + '\n' + sources))
+            finding_rows.append((AnalystReference('finding', i), f'{finding.attention_level.upper()}  |  {human_label(operations)}\n{sources}', i + '\n' + operations + '\n' + sources))
         self.finding_highlights.render(finding_rows, self._activate)
         visible_entities, visible_relations, visible_findings = map(set, collections[1:4])
         entities = sorted(view.entity_ids, key=lambda i: (-len(visible_relations.intersection(context.entities[i].relation_ids)),
@@ -261,6 +297,9 @@ class InvestigationOverview(WorkspacePages):
             correlation_rows.append((AnalystReference('correlation', i), f'{c.left_column} <-> {c.right_column}\n' +
                 count_label(m.common, 'common key') + ' | ' + count_label(m.matched_rows, 'matched row'), endpoints + '\n' + i))
         self.correlation_highlights.render(correlation_rows, self._activate)
+        has_highlights = bool(finding_rows or entities or correlation_rows)
+        self.highlights_heading.setVisible(has_highlights)
+        self.highlights_grid.setVisible(has_highlights)
         visible_analyses = set(view.analysis_ids)
         self.coverage.setRowCount(len(view.dataset_names))
         for row, name in enumerate(view.dataset_names):

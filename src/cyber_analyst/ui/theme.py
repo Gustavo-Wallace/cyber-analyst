@@ -1,5 +1,6 @@
 """Small native workstation theme: tokens, typography roles and shared surfaces."""
 from types import MappingProxyType
+from hashlib import sha256
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QLabel, QFrame, QVBoxLayout, QTableWidget
 from PySide6.QtCore import Qt
@@ -10,7 +11,35 @@ COLORS = MappingProxyType(dict(
     elevated='#1d2b3e', hover='#23354a', selected='#183c4b', text='#e6edf6',
     secondary='#aab9cd', muted='#7f91aa', border='#2a3a50', cyan='#54ccd7', cyan_hover='#79dce4',
     violet='#a995ee', tertiary='#d995bb', success='#78c7b3', warning='#dfba7d', danger='#dc8b9b',
+    blue='#79a9df', purple='#b08bd1', magenta='#cf8eb8', teal='#72bbb0', amber='#d9b77c',
 ))
+DATA_PALETTE = tuple(COLORS[name] for name in ('cyan', 'blue', 'violet', 'purple', 'magenta', 'teal', 'amber'))
+ATTENTION_COLORS = MappingProxyType({
+    'informational': COLORS['blue'], 'low': COLORS['teal'],
+    'medium': COLORS['violet'], 'high': COLORS['magenta'],
+})
+IDENTIFIER_COLORS = MappingProxyType({
+    'username': COLORS['cyan'], 'email': COLORS['blue'], 'ip_address': COLORS['violet'],
+    'hostname': COLORS['teal'], 'cve': COLORS['magenta'],
+})
+
+
+def data_color(category):
+    """Stable across refreshes, filters and Python processes."""
+    return IDENTIFIER_COLORS.get(category) or DATA_PALETTE[
+        int.from_bytes(sha256(category.encode('utf-8')).digest()[:4], 'big') % len(DATA_PALETTE)]
+
+
+def data_colors(categories):
+    """Avoid collisions in a small composition while retaining semantic colors.
+    Larger charts cycle the finite palette; labels/values remain authoritative.
+    """
+    assigned = {}
+    for category in sorted(set(categories), key=lambda k: (k not in IDENTIFIER_COLORS, k)):
+        preferred = data_color(category)
+        available = [color for color in DATA_PALETTE if color not in assigned.values()]
+        assigned[category] = preferred if preferred in available or not available else available[0]
+    return MappingProxyType(assigned)
 SPACE = MappingProxyType(dict(xs=4, sm=8, md=12, lg=16, xl=24, xxl=32))
 RADIUS = MappingProxyType(dict(sm=4, md=6, lg=8))
 TYPE = MappingProxyType(dict(page_title=(23, 600), section_title=(14, 600),
