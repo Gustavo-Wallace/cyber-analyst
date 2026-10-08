@@ -137,6 +137,7 @@ class MainWindow(QMainWindow):
         self.destroyed.connect(self.analyst_runner.dispose)
         self.analyst_page = AnalystPage(self.investigation_session, self.analyst_runner)
         self.analyst_page.reference_navigated.connect(self._open_analyst_reference)
+        self.analyst_page.destination_requested.connect(lambda destination: self._show_page(3 if destination == 'Data' else 0))
         self.settings_page = SettingsPage(self._apply_runtime_config)
         destinations = (
             ('Dashboard', self.overview_page), ('Investigate', self.investigation_tabs),

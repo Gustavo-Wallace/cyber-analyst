@@ -87,6 +87,52 @@ def test_navigation_empty_and_configuration(setup):
     assert not page.question.isEnabled() and 'Settings' in page.status.text()
 
 
+def test_approachable_empty_states_and_explicit_data_dashboard_paths(setup):
+    app, p, w, page = setup
+    assert page.no_investigation.isVisible()
+    assert page.empty.text() == 'Complete an investigation first'
+    assert not page.starter.isVisible() and not page.next_steps.steps
+    page.data_button.click()
+    assert w.pages.currentWidget() is w.datasets_page
+    w.navigation.button(6).click(); page.dashboard_button.click()
+    assert w.pages.currentWidget() is w.overview_page
+    w.navigation.button(6).click()
+    w.set_investigation(synthetic())
+    assert page.starter.isVisible() and not page.no_investigation.isVisible()
+    assert page.next_steps.isVisible()
+    assert page.question.placeholderText() == 'Ask about this investigation...'
+    assert page.send_button.property('role') == 'primary'
+    assert not page.cancel_button.isVisible() and not p.calls
+
+
+def test_starter_recommendation_navigates_without_submitting_question(setup):
+    app, p, w, page = setup
+    w.set_investigation(synthetic())
+    step = page.next_steps.steps[0]
+    page.next_steps.buttons[0].click()
+    assert w.investigation_session.state.focus.finding_id == step.target_id
+    assert w.pages.currentWidget() is w.findings_page
+    assert not p.calls and not page.exchanges
+
+
+def test_starter_hides_during_transcript_and_returns_after_clear(setup):
+    app, p, w, page = setup
+    send(w, page)
+    wait(app, lambda: bool(p.calls))
+    assert not page.starter.isVisible() and not page.next_steps.isVisible()
+    assert page.cancel_button.isVisible()
+    p.release.set()
+    wait(app, lambda: not w.analyst_runner.running)
+    exchange = page.exchanges[0]
+    assert not exchange.diagnostics.isVisible()
+    assert not exchange.diagnostic_button.isChecked()
+    assert not exchange.references.items[0].identity.isVisible()
+    assert exchange.references.items[0].open_button.toolTip() == 'ana'
+    page.clear_button.click()
+    assert page.starter.isVisible() and page.next_steps.isVisible()
+    assert not page.cancel_button.isVisible()
+
+
 def test_investigation_run_blocks_analyst_submission(setup):
     app, p, w, page = setup
     w.set_investigation(synthetic())
@@ -143,7 +189,7 @@ def test_rendering_exact_plain_text_references_limitations(setup):
     assert len(e.references.items) == 1
     item = e.references.items[0]
     assert item.reference == AnalystReference('entity', 'ana')
-    assert item.label.text() == 'entity | ana | directory, remote_access'
+    assert item.label.text() == 'Identifier | ana | directory, remote_access'
     assert item.identity.text() == item.identity.toolTip() == 'ana'
     assert e.limitations.text() == 'Limitations\nCorrelation does not establish causation.'
     assert not e.diagnostics.isVisible()

@@ -8,6 +8,7 @@ from .workstation import WorkspacePages
 from .count_labels import count_label
 from .dashboard_visuals import select_visuals, human_label, ATTENTION_ORDER
 from .chart_factory import VisualPanel
+from .next_steps import NextStepsWidget
 
 
 
@@ -206,6 +207,9 @@ class InvestigationOverview(WorkspacePages):
         self.correlation_highlights = Highlights('Dataset matches', 'Most shared keys first. Up to two shown.', 'No visible dataset matches.')
         self.highlights_grid = ResponsiveGrid((self.finding_highlights, self.entity_highlights, self.correlation_highlights), 280, 3, align_top=True)
         layout.addWidget(self.highlights_grid)
+        self.next_steps = NextStepsWidget(session)
+        self.next_steps.navigated.connect(self.target_requested)
+        layout.addWidget(self.next_steps)
         coverage_panel, box = panel('Dataset coverage', 'Visible investigation objects by source dataset. Select a row to inspect its counts.')
         self.coverage = QTableWidget(0, 5)
         self.coverage.setHorizontalHeaderLabels(['Dataset', 'Identifiers', 'Connections', 'Alerts', 'Analysis'])

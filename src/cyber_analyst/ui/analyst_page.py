@@ -8,11 +8,9 @@ from cyber_analyst.analyst import AnalystRequest
 from cyber_analyst.ai.models import AIProviderError, AIStructuredOutputError
 from cyber_analyst.ai.runtime import LlamaRuntimeError
 from .analyst_runner import AnalystSnapshot
-from .analyst_references import ReferenceList
-from .theme import role
-
-REFERENCE_UNAVAILABLE = 'Not available in the current view.'
-
+from .analyst_references import ReferenceList, REFERENCE_UNAVAILABLE
+from .next_steps import NextStepsWidget
+from .theme import SPACE, role, label
 
 def plain_label(text):
     label = QLabel(text)
@@ -85,23 +83,26 @@ class Exchange(QWidget):
     def __init__(self, snapshot, parent=None):
         super().__init__(parent)
         self.snapshot = snapshot
+        role(self, 'panel')
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 12)
+        layout.setContentsMargins(SPACE['md'], SPACE['md'], SPACE['md'], SPACE['md'])
+        layout.setSpacing(SPACE['sm'])
         self.snapshot_label = plain_label('')
         self.current = True
         self.mark_current(snapshot.context)
         layout.addWidget(self.snapshot_label)
-        layout.addWidget(plain_label('You'))
-        self.question = plain_label(snapshot.request.question)
+        layout.addWidget(role(plain_label('You'), 'caption', 'cyan'))
+        self.question = role(plain_label(snapshot.request.question), 'body')
         layout.addWidget(self.question)
-        layout.addWidget(plain_label('AI Analyst'))
-        self.result_status = plain_label('Running request')
+        layout.addWidget(role(plain_label('AI Analyst'), 'caption', 'violet'))
+        self.result_status = role(plain_label('Running request'), 'caption', 'muted')
         layout.addWidget(self.result_status)
         self.outcome_status = 'running'
         self.answer = QPlainTextEdit('Running...')
         self.answer.setReadOnly(True)
+        role(self.answer, 'inspector_details')
         self.answer.setMinimumHeight(65)
-        self.answer.setMaximumHeight(300)
+        self.answer.setFixedHeight(65)
         layout.addWidget(self.answer)
         self.references = ReferenceList()
         self.references.activated.connect(lambda reference: self.reference_requested.emit(self, reference))
@@ -109,12 +110,15 @@ class Exchange(QWidget):
         self.reference_status = plain_label('')
         self.reference_status.hide()
         layout.addWidget(self.reference_status)
-        self.limitations = plain_label('')
+        self.limitations = role(plain_label(''), 'caption')
         self.limitations.hide()
         layout.addWidget(self.limitations)
         self.diagnostic_button = QToolButton()
         self.diagnostic_button.setText('Execution details')
         self.diagnostic_button.setCheckable(True)
+        self.diagnostic_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.diagnostic_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.diagnostic_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.diagnostic_button)
         self.diagnostics = QPlainTextEdit()
         self.diagnostics.setReadOnly(True)
@@ -122,16 +126,21 @@ class Exchange(QWidget):
         self.diagnostics.hide()
         layout.addWidget(self.diagnostics)
         self.diagnostic_button.toggled.connect(self.diagnostics.setVisible)
+        self.diagnostic_button.toggled.connect(lambda expanded: self.diagnostic_button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow))
 
     def render(self, outcome):
         response = outcome.response
         # Exact backend text, without Markdown/HTML interpretation or rewriting.
         self.answer.setPlainText('\n\n'.join((response.summary, *(o.text for o in response.observations))))
+        self._fit_answer()
         refs = tuple(dict.fromkeys(r for o in response.observations for r in o.references))
         self.references.render((ref, reference_label(ref, self.snapshot), reference_context(ref, self.snapshot)) for ref in refs)
         self.references.set_current(self.current)
         self.outcome_status = response.status
         self.result_status.setText('Insufficient context' if response.status == 'insufficient_context' else 'Answered')
+        self.result_status.setToolTip('The available evidence does not support this question.'
+                                     if response.status == 'insufficient_context' else 'Grounded factual answer')
         role(self.result_status, 'caption', 'muted' if response.status == 'insufficient_context' else 'success')
         self.limitations.setText('Limitations\n' + '\n'.join(response.limitations) if response.limitations else '')
         self.limitations.setVisible(bool(response.limitations))
@@ -142,6 +151,7 @@ class Exchange(QWidget):
         self.result_status.setText('Execution failed')
         role(self.result_status, 'caption', 'warning')
         self.answer.setPlainText(error_message(error))
+        self._fit_answer()
         self._diagnostics(getattr(error, 'diagnostics', ()))
 
     def render_cancelled(self):
@@ -159,7 +169,8 @@ class Exchange(QWidget):
         self.current = self.snapshot.context is context
         names = ', '.join(self.snapshot.view.dataset_names)
         previous = ' | Previous investigation' if not self.current else ''
-        self.snapshot_label.setText(f'Investigation {self.snapshot.investigation_number}{previous} | {names} | {self.snapshot.request.scope}')
+        scope = 'Current focus' if self.snapshot.request.scope == 'current_focus' else 'Visible investigation'
+        self.snapshot_label.setText(f'Investigation {self.snapshot.investigation_number}{previous} | {names} | {scope}')
         role(self.snapshot_label, 'caption', 'muted' if self.current else 'warning')
         if hasattr(self, 'references'):
             self.references.set_current(self.current)
@@ -172,9 +183,15 @@ class Exchange(QWidget):
         self.diagnostics.setPlainText('\n'.join(f'{key}: {value}' for key, value in diagnostics)
                                       or 'Detailed diagnostics are unavailable for this request.')
 
+    def _fit_answer(self):
+        # Bound display height only; long/wrapped answers remain scrollable.
+        lines = self.answer.document().blockCount() + 1
+        self.answer.setFixedHeight(min(300, max(65, lines * self.answer.fontMetrics().lineSpacing() + 16)))
+
 
 class AnalystPage(QWidget):
     reference_navigated = Signal(object)
+    destination_requested = Signal(str)
 
     def __init__(self, session, runner, parent=None):
         super().__init__(parent)
@@ -186,18 +203,46 @@ class AnalystPage(QWidget):
         self._blocked = False
         self._restore_editor_focus = False
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SPACE['sm'])
         title = plain_label('AI Analyst')
         title.setObjectName('pageTitle')
         layout.addWidget(title)
-        layout.addWidget(plain_label('Answers use the active investigation. Questions are independent; history is not sent.'))
-        self.empty = plain_label('No active investigation. Load or run an investigation to ask questions.')
-        layout.addWidget(self.empty)
+        layout.addWidget(role(plain_label('Ask questions about the current investigation.'), 'body'))
         self.conversation = QScrollArea()
         self.conversation.setWidgetResizable(True)
         self.conversation.setMinimumSize(0, 0)
         self.conversation.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.transcript = QWidget()
         self.transcript_layout = QVBoxLayout(self.transcript)
+        self.transcript_layout.setContentsMargins(0, 0, 0, 0)
+        self.transcript_layout.setSpacing(SPACE['md'])
+        self.no_investigation = role(QWidget(), 'panel')
+        empty_box = QVBoxLayout(self.no_investigation)
+        empty_box.setContentsMargins(SPACE['lg'], SPACE['lg'], SPACE['lg'], SPACE['lg'])
+        self.empty = role(plain_label('Complete an investigation first'), 'section_title')
+        empty_box.addWidget(self.empty)
+        empty_box.addWidget(role(plain_label('Add datasets in Data, then choose Analyze on Dashboard.'), 'caption'))
+        actions = QHBoxLayout()
+        self.data_button = role(QPushButton('Open Data'), 'primary')
+        self.dashboard_button = role(QPushButton('Open Dashboard'), 'secondary')
+        self.data_button.clicked.connect(lambda: self.destination_requested.emit('Data'))
+        self.dashboard_button.clicked.connect(lambda: self.destination_requested.emit('Dashboard'))
+        actions.addWidget(self.data_button)
+        actions.addWidget(self.dashboard_button)
+        actions.addStretch()
+        empty_box.addLayout(actions)
+        self.transcript_layout.addWidget(self.no_investigation)
+        self.starter = role(QWidget(), 'panel')
+        starter_box = QVBoxLayout(self.starter)
+        starter_box.setContentsMargins(SPACE['lg'], SPACE['lg'], SPACE['lg'], SPACE['lg'])
+        starter_box.addWidget(role(plain_label('Ask about your investigation'), 'section_title'))
+        starter_box.addWidget(role(plain_label(
+            'Ask about identifiers, alerts, dataset matches or anything found during analysis.'), 'caption'))
+        self.transcript_layout.addWidget(self.starter)
+        self.next_steps = NextStepsWidget(session)
+        self.next_steps.navigated.connect(self.reference_navigated)
+        self.transcript_layout.addWidget(self.next_steps)
         self.transcript_layout.addStretch()
         self.conversation.setWidget(self.transcript)
         layout.addWidget(self.conversation, 1)
@@ -212,20 +257,23 @@ class AnalystPage(QWidget):
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             combo.setMinimumContentsLength(8)
             combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        controls.addWidget(label('Scope', 'caption'))
         controls.addWidget(self.scope)
+        controls.addWidget(label('Language', 'caption'))
         controls.addWidget(self.language)
-        self.clear_button = QPushButton('Clear conversation')
+        self.clear_button = role(QPushButton('Clear conversation'), 'secondary')
         layout.addLayout(controls)
         self.question = QuestionInput()
-        self.question.setPlaceholderText('Ask a factual question (Ctrl+Enter to send)')
+        self.question.setPlaceholderText('Ask about this investigation...')
+        self.question.setToolTip('Ctrl+Enter to send. Each question is independent; history is not sent.')
         self.question.setMinimumHeight(42)
         self.question.setMaximumHeight(70)
         layout.addWidget(self.question)
         footer = QHBoxLayout()
-        self.status = plain_label('')
+        self.status = role(plain_label(''), 'caption')
         footer.addWidget(self.status, 1)
         footer.addWidget(self.clear_button)
-        self.send_button = QPushButton('Send')
+        self.send_button = role(QPushButton('Send'), 'primary')
         self.cancel_button = QPushButton('Cancel')
         footer.addWidget(self.cancel_button)
         footer.addWidget(self.send_button)
@@ -252,7 +300,6 @@ class AnalystPage(QWidget):
                 self._investigation_number += 1
             for exchange in self.exchanges:
                 exchange.mark_current(self._context)
-        self.empty.setVisible(self.session.context is None)
         self.refresh_controls()
 
     def set_execution_blocked(self, blocked):
@@ -260,6 +307,11 @@ class AnalystPage(QWidget):
         self.refresh_controls()
 
     def refresh_controls(self):
+        active = self.session.context is not None
+        self.no_investigation.setVisible(not active)
+        self.starter.setVisible(active and not self.exchanges)
+        self.next_steps.setVisible(active and not self.exchanges and bool(self.next_steps.steps))
+        self.conversation.setVisible(True)
         configured = callable(getattr(self.runner.pipeline, 'answer', None))
         ready = self.session.context is not None and configured and not self.runner.running and not self._blocked
         for control in (self.question, self.scope, self.language):
@@ -284,6 +336,7 @@ class AnalystPage(QWidget):
             exchange = Exchange(snapshot)
             exchange.reference_requested.connect(self._navigate_reference)
             self.exchanges.append(exchange)
+            self.refresh_controls()
             self.transcript_layout.insertWidget(self.transcript_layout.count() - 1, exchange)
             self._active_exchange = exchange
             self._restore_editor_focus = True

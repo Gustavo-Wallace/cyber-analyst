@@ -19,3 +19,7 @@ from .state import AnalysisRef
 from .navigation import NavigationService, NavigationError
 
 __all__ += ["AnalysisRef", "NavigationService", "NavigationError"]
+
+from .next_steps import RecommendedStep, NextStepsService, MAX_RECOMMENDED_STEPS
+
+__all__ += ["RecommendedStep", "NextStepsService", "MAX_RECOMMENDED_STEPS"]
