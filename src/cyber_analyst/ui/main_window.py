@@ -137,26 +137,30 @@ class MainWindow(QMainWindow):
         self.analyst_page.reference_navigated.connect(self._open_analyst_reference)
         self.settings_page = SettingsPage(self._apply_runtime_config)
         destinations = (
-            ('Overview', self.overview_page), ('Investigate', self.investigation_tabs),
+            ('Dashboard', self.overview_page), ('Investigate', self.investigation_tabs),
             ('Findings', self.findings_page), ('Data', self.datasets_page),
             ('Relations', self.relations_tabs), ('Settings', self.settings_page),
             ('AI Analyst', self.analyst_page))
         for index, (title, page) in enumerate(destinations):
-            button = role(QPushButton(title), 'sidebar_button')
+            button = role(QPushButton(title, sidebar), 'sidebar_button')
             button.setCheckable(True)
             self.navigation.addButton(button, index)
             self.pages.addWidget(page)
-        for index in (0, 1, 2, 3, 4, 6):
+            if index in (1, 2, 4):
+                button.hide()
+        for index in (0, 3, 6):
             navigation_layout.addWidget(self.navigation.button(index))
         navigation_layout.addStretch()
         navigation_layout.addWidget(self.navigation.button(5))
-        self.navigation.idClicked.connect(self.pages.setCurrentIndex)
+        self.navigation.idClicked.connect(self._show_page)
         self.navigation.button(0).setChecked(True)
         self.pages.setCurrentIndex(0)
         layout.addWidget(sidebar)
         self.workspace = Workspace(self.pages)
         self.pages.currentChanged.connect(lambda index: self.workspace.header.set_page(self.navigation.button(index).text()))
         self.overview_page.target_requested.connect(self._open_analyst_reference)
+        self.overview_page.detail_requested.connect(self._open_dashboard_detail)
+        self.dashboard_page.manual_requested.connect(lambda: self._show_page(1))
         self._close_pending = False
         self._quit_pending = False
         QApplication.instance().installEventFilter(self)
@@ -168,7 +172,8 @@ class MainWindow(QMainWindow):
         QApplication.instance().aboutToQuit.connect(self.analyst_runner.shutdown)
         QApplication.instance().aboutToQuit.connect(self._shutdown_runtime)
         self.analyst_runner.changed.connect(self._update_run_controls)
-        self.workspace.run_button.clicked.connect(self._run_investigation)
+        self.workspace.run_button.clicked.connect(self._primary_action)
+        self.dashboard_page.primary_requested.connect(self._primary_action)
         self.datasets_page.loading_finished.connect(self._update_run_controls)
         self._update_run_controls()
         layout.addWidget(self.workspace, 1)
@@ -180,7 +185,7 @@ class MainWindow(QMainWindow):
         self.context_inspector = ContextInspector()
         self.context_dock.setWidget(self.context_inspector)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.context_dock)
-        self.workspace.inspector_button.setChecked(True)
+        self.context_dock.hide()
         self.workspace.inspector_button.toggled.connect(self.context_dock.setVisible)
         self.context_dock.visibilityChanged.connect(self.workspace.inspector_button.setChecked)
         self.resizeDocks([self.context_dock], [210], Qt.Orientation.Horizontal)
@@ -197,6 +202,27 @@ class MainWindow(QMainWindow):
             if heading.objectName() == 'pageTitle':
                 heading.hide()
         apply_theme(self)
+
+    def _show_page(self, index):
+        # Specialist routes keep Dashboard selected without becoming sidebar entries.
+        self.navigation.button(0 if index in (1, 2, 4) else index).setChecked(True)
+        self.pages.setCurrentIndex(index)
+
+    def _primary_action(self):
+        if not len(self.collection):
+            self._show_page(3)
+        else:
+            self._run_investigation()
+
+    def _open_dashboard_detail(self, kind):
+        if kind in ('entities', 'relations'):
+            self.relations_tabs.setCurrentIndex(0 if kind == 'entities' else 1)
+            self._show_page(4)
+        elif kind in ('analyses', 'correlations'):
+            self.investigation_tabs.setCurrentIndex(0 if kind == 'analyses' else 1)
+            self._show_page(1)
+        elif kind == 'findings':
+            self._show_page(2)
 
     def set_investigation(self, result):
         self.investigation_session.load(result)
@@ -242,6 +268,13 @@ class MainWindow(QMainWindow):
         self.analyst_page.set_execution_blocked(runner.running or self._close_pending)
         self.workspace.run_button.setEnabled(available and bool(len(self.collection)) and not busy and not self.datasets_page.is_loading and not self._close_pending)
         self.workspace.run_button.setToolTip('No investigation pipeline configured' if not available else 'Run on the currently loaded datasets')
+        has_data = bool(len(self.collection))
+        self.workspace.run_button.setText('Analyze again' if has_data and self.investigation_session.context else 'Analyze' if has_data else 'Add datasets')
+        if not has_data:
+            self.workspace.run_button.setEnabled(not busy and not self.datasets_page.is_loading and not self._close_pending)
+            self.workspace.run_button.setToolTip('Choose datasets in Data')
+        self.dashboard_page.set_primary_action(self.workspace.run_button.text(), self.workspace.run_button.isEnabled(), self.workspace.run_button.toolTip())
+        self.workspace.header._reflow()
         self.datasets_page.setEnabled(not runner.running)
         if runner.running:
             self.workspace.run_status.setText('Running investigation...')
@@ -259,11 +292,14 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(str(exc))
 
     def _investigation_completed(self, result):
+        first_result = self.investigation_session.context is None
         try:
             self.set_investigation(result)
         except Exception as exc:
             self._investigation_failed(exc)
             return
+        if first_result:
+            self._show_page(0)
         self.workspace.run_status.setText('Completed')
         self.statusBar().showMessage('Investigation completed')
 
@@ -275,12 +311,17 @@ class MainWindow(QMainWindow):
     def _investigation_changed(self):
         session=self.investigation_session
         self.workspace.header.set_investigation(session.context)
+        if self.pages.currentIndex() == 0:
+            self.workspace.header.description.setText('Explore your data, review alerts and ask AI Analyst.'
+                if session.context else 'Choose one or more datasets to start an investigation.')
+        self.workspace.refresh_exploration(session)
+        self._update_run_controls()
         self.investigation_tabs.setTabVisible(1, session.context is not None)
         self.relations_tabs.setTabVisible(0, session.context is not None)
         self.workspace.search_results.clear()
         self.workspace.search_results.hide()
         self.workspace.search.setEnabled(session.context is not None)
-        self.workspace.search.setPlaceholderText('Search investigation' if session.context else 'Load an investigation to search')
+        self.workspace.search.setPlaceholderText('Search data' if session.context else 'Load an investigation to search')
         if session.context is None:
             self.workspace.search.clear()
         self.context_inspector.render(session.context,session.state)

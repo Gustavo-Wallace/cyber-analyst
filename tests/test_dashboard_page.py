@@ -47,7 +47,16 @@ def test_session_flow(window, tmp_path, monkeypatch):
     data.load_paths([first, second])
     wait(data.loading_finished, lambda: data.is_loading)
     dashboard = window.dashboard_page
-    assert not dashboard.empty_label.isVisible()
+    assert dashboard.empty_label.text() == 'Datasets ready'
+    assert '2 datasets | 5 rows' in dashboard.empty_caption.text()
+    assert not dashboard.body.isVisible()
+    dashboard.details_button.click()
+    assert dashboard.body.isVisible()
+    dashboard.manual_button.click()
+    assert window.pages.currentWidget() is window.investigation_tabs
+    assert window.analysis_explorer.currentWidget() is window.investigate_page
+    assert window.investigate_page.widget(0) is window.analyses_page
+    window.navigation.button(0).click()
     assert dashboard.kpis["datasets"].text() == "2"
     assert dashboard.kpis["rows"].text() == "5"
     assert dashboard.kpis["columns"].text() == "3"

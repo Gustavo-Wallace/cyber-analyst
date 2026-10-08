@@ -11,8 +11,9 @@ class WorkspaceHeader(QWidget):
         self.grid = QGridLayout(self)
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setSpacing(SPACE['sm'])
-        self.title = label('Overview', 'page_title')
-        self.description = label('Investigation coverage, attention and connected evidence.', 'caption')
+        self.title = label('Dashboard', 'page_title')
+        self.description = label('Choose one or more datasets to start an investigation.', 'caption')
+        self.primary_button = role(QPushButton('Add datasets'), 'primary')
         self.session_label = label('NO INVESTIGATION', 'badge')
         self.run_status = label('Ready', 'caption')
         for widget in (self.title, self.session_label, self.run_status):
@@ -24,7 +25,8 @@ class WorkspaceHeader(QWidget):
         row.addWidget(self.run_status)
         self.grid.addWidget(self.title, 0, 0)
         self.grid.addWidget(self.identity, 0, 1)
-        self.grid.addWidget(self.description, 1, 0, 1, 2)
+        self.grid.addWidget(self.primary_button, 0, 2)
+        self.grid.addWidget(self.description, 1, 0, 1, 3)
         self.grid.setColumnStretch(0, 1)
         self._context = None
         self._number = 0
@@ -32,7 +34,7 @@ class WorkspaceHeader(QWidget):
     def set_page(self, title):
         self.title.setText(title)
         descriptions = {
-            'Overview': 'Investigation coverage, attention and connected evidence.',
+            'Dashboard': 'Explore your data, review alerts and ask AI Analyst.',
             'Investigate': 'Browse executed analyses and correlations.',
             'Findings': 'Review selected deterministic evidence and its provenance.',
             'Data': 'Manage source datasets and inspect their metadata.',
@@ -53,8 +55,10 @@ class WorkspaceHeader(QWidget):
         self._reflow()
 
     def _reflow(self):
-        compact = self.width() < max(360, self.title.sizeHint().width() + self.identity.sizeHint().width() + SPACE['sm'])
+        compact = self.width() < max(520, self.title.sizeHint().width() + self.identity.sizeHint().width() + self.primary_button.sizeHint().width() + 2 * SPACE['sm'])
         self.grid.addWidget(self.identity, 1 if compact else 0, 0 if compact else 1)
+        self.grid.addWidget(self.primary_button, 0, 1 if compact else 2)
+        self.grid.addWidget(self.description, 2 if compact else 1, 0, 1, 2 if compact else 3)
         self.description.setVisible(not compact)
 
     def resizeEvent(self, event):
@@ -90,7 +94,7 @@ class Workspace(QWidget):
         layout.setSpacing(SPACE['sm'])
         self.header = WorkspaceHeader()
         layout.addWidget(self.header)
-        self.run_button = role(QPushButton('Run investigation'), 'primary')
+        self.run_button = self.header.primary_button
         self.run_status = self.header.run_status
         self.command_panel = role(QWidget(), 'toolbar')
         command_layout = QVBoxLayout(self.command_panel)
@@ -104,6 +108,8 @@ class Workspace(QWidget):
         search.setEnabled(False)
         self.inspector_button=role(QPushButton('Context'), 'secondary')
         self.inspector_button.setCheckable(True)
+        self.filters_button = role(QPushButton('Filters'), 'secondary')
+        self.filters_button.setCheckable(True)
         command_layout.addLayout(self.commands)
         self._compact_commands = None
         self.search_results=QListWidget()
@@ -111,8 +117,11 @@ class Workspace(QWidget):
         self.search_results.hide()
         command_layout.addWidget(self.search_results)
         self.filters = InvestigationFilters()
+        self.filters.set_expanded(False)
+        self.filters_button.toggled.connect(self.filters.set_expanded)
         command_layout.addWidget(self.filters)
         layout.addWidget(self.command_panel)
+        self.command_panel.hide()
         scroll=QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setMinimumSize(0,0)
@@ -128,10 +137,22 @@ class Workspace(QWidget):
             return
         for col in range(3): self.commands.setColumnStretch(col, 0)
         self.commands.addWidget(self.search, 0, 0, 1, 2 if compact else 1)
-        self.commands.addWidget(self.run_button, 1 if compact else 0, 0 if compact else 1)
+        self.commands.addWidget(self.filters_button, 1 if compact else 0, 0 if compact else 1)
         self.commands.addWidget(self.inspector_button, 1 if compact else 0, 1 if compact else 2)
         self.commands.setColumnStretch(0, 1)
         self._compact_commands = compact
+
+    def refresh_exploration(self, session):
+        active = session.context is not None
+        self.command_panel.setVisible(active)
+        state = session.state
+        count = sum(bool(values) for values in (state.dataset_scope, state.entity_types, state.attention_levels)) if active else 0
+        self.filters_button.setText(f'Filters ({count})' if count else 'Filters')
+        self.filters_button.setProperty('filterActive', bool(count))
+        self.filters_button.style().unpolish(self.filters_button)
+        self.filters_button.style().polish(self.filters_button)
+        if not active:
+            self.filters_button.setChecked(False)
 
     def resizeEvent(self, event):
         self._reflow_commands()

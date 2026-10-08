@@ -50,7 +50,8 @@ def test_reference_uses_existing_navigation_and_reveals_object(setup, monkeypatc
     assert all((args[-1] if svc is StateService else args[-1].target_id) == reference.target_id
                for args, _ in calls)
     assert w.pages.currentIndex() == destination
-    assert w.navigation.button(destination).isChecked()
+    assert w.navigation.checkedId() == (0 if destination in (1, 2, 4) else destination)
+    assert all(w.navigation.button(i).isHidden() for i in (1, 2, 4))
     assert (s.state.dataset_scope, s.state.entity_types, s.state.attention_levels) == (
         before.dataset_scope, before.entity_types, before.attention_levels)
     if focus is not None:

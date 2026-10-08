@@ -59,9 +59,14 @@ def load(w, pipeline):
 
 def test_success_snapshot_thread_and_controls(setup):
     app, pipeline, w = setup
-    assert not w.workspace.run_button.isEnabled()
+    assert w.workspace.run_button.text() == 'Add datasets'
+    assert w.workspace.run_button.isEnabled()
+    w.workspace.run_button.click()
+    assert w.pages.currentWidget() is w.datasets_page and not pipeline.calls
     load(w, pipeline)
     assert w.workspace.run_button.isEnabled()
+    assert w.workspace.run_button.text() == 'Analyze'
+    assert w.dashboard_page.primary_button.text() == 'Analyze'
     snapshot = w.collection.values()
     w.workspace.run_button.click()
     wait(app, lambda: bool(pipeline.calls))
@@ -77,6 +82,8 @@ def test_success_snapshot_thread_and_controls(setup):
     pipeline.release.set()
     wait(app, lambda: not w.investigation_runner.running)
     assert w.investigation_session.result is pipeline.result
+    assert w.pages.currentWidget() is w.overview_page
+    assert w.workspace.run_button.text() == 'Analyze again'
     assert w.workspace.search.isEnabled() and w.workspace.filters.datasets.isEnabled()
     assert w.findings_page.table.rowCount() == 2 and w.relations_page.table.rowCount() == 2
     assert w.workspace.run_status.text() == 'Completed'
@@ -125,3 +132,30 @@ def test_no_pipeline_still_loads_datasets(setup):
         assert w.datasets_page.isEnabled()
     finally:
         w.close()
+
+
+def test_successful_rerun_keeps_inspected_destination(setup):
+    app, pipeline, w = setup
+    load(w, pipeline)
+    w.set_investigation(synthetic())
+    w.navigation.button(2).click()
+    w.workspace.run_button.click()
+    pipeline.release.set()
+    wait(app, lambda: not w.investigation_runner.running)
+    assert w.investigation_session.result is pipeline.result
+    assert w.pages.currentWidget() is w.findings_page
+    assert w.navigation.checkedId() == 0
+
+
+def test_dashboard_action_reuses_data_and_runner(setup):
+    app, pipeline, w = setup
+    w.dashboard_page.primary_button.click()
+    assert w.pages.currentWidget() is w.datasets_page
+    load(w, pipeline)
+    w.navigation.button(0).click()
+    w.dashboard_page.primary_button.click()
+    wait(app, lambda: bool(pipeline.calls))
+    assert len(pipeline.calls) == 1
+    pipeline.release.set()
+    wait(app, lambda: not w.investigation_runner.running)
+    assert w.investigation_session.result is pipeline.result

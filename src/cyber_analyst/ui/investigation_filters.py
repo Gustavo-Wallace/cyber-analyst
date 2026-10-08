@@ -46,7 +46,9 @@ class InvestigationFilters(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.controls = QGridLayout()
+        self.controls_panel = QWidget()
+        self.controls = QGridLayout(self.controls_panel)
+        self.controls.setContentsMargins(0, 0, 0, 0)
         self.controls.setSpacing(SPACE['sm'])
         self.controls.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.controls.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
@@ -57,12 +59,16 @@ class InvestigationFilters(QWidget):
         self._widgets = (self.datasets, self.entities, self.attention, self.clear_button)
         for widget in self._widgets:
             widget.setEnabled(False)
-        layout.addLayout(self.controls)
+        layout.addWidget(self.controls_panel)
         self._columns = 0
         self._reflow()
         self.summary = role(QLabel('No active investigation'), 'caption')
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
+        self.active_summary = role(QLabel(), 'caption')
+        self.active_summary.setWordWrap(True)
+        layout.addWidget(self.active_summary)
+        self.active_summary.hide()
         for control in (self.datasets, self.entities, self.attention):
             control.refresh((), (), False)
 
@@ -80,6 +86,9 @@ class InvestigationFilters(QWidget):
         self._reflow()
         super().resizeEvent(event)
 
+    def set_expanded(self, expanded):
+        self.controls_panel.setVisible(expanded)
+
     def bind(self, session):
         self.session = session
         self.datasets.selection_changed.connect(session.set_dataset_scope)
@@ -96,6 +105,10 @@ class InvestigationFilters(QWidget):
         for control, options, values in zip((self.datasets, self.entities, self.attention), session.filter_options, selected):
             control.refresh(options, values, active)
         self.clear_button.setEnabled(active)
+        self.active_summary.setText(' | '.join(
+            f'{name}: {", ".join(values)}' for name, values in
+            zip(('Datasets', 'Types', 'Attention'), selected) if values))
+        self.active_summary.setVisible(bool(self.active_summary.text()))
         view = session.view
         self.summary.setText(
             ' · '.join((count_label(len(view.dataset_names), 'dataset'),

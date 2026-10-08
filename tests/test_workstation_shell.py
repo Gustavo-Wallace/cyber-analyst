@@ -1,4 +1,5 @@
 import os
+import pytest
 os.environ['QT_QPA_PLATFORM']='offscreen'
 from PySide6.QtWidgets import QApplication
 from cyber_analyst.ui.main_window import MainWindow
@@ -17,10 +18,12 @@ def test_shell_no_backend_calls_and_inspector(monkeypatch):
         assert (w.width(),w.height())==(1100,720)
         w.show();app.processEvents()
         inspector=w.context_dock.widget()
-        w.workspace.inspector_button.click();app.processEvents()
         assert not w.context_dock.isVisible()
+        assert not w.workspace.inspector_button.isChecked()
         w.workspace.inspector_button.click();app.processEvents()
-        assert w.context_dock.isVisible() and w.context_dock.widget() is inspector
+        assert w.context_dock.isVisible()
+        w.workspace.inspector_button.click();app.processEvents()
+        assert not w.context_dock.isVisible() and w.context_dock.widget() is inspector
         w.context_dock.close();app.processEvents()
         assert not w.workspace.inspector_button.isChecked()
         w.workspace.inspector_button.click();app.processEvents()
@@ -45,7 +48,7 @@ def test_navigation_header_and_session_identity():
         w.show(); app.processEvents()
         sidebar = [w.sidebar.layout().itemAt(i).widget() for i in range(w.sidebar.layout().count())]
         assert [b.text() for b in sidebar if isinstance(b, QPushButton)] == [
-            'Overview', 'Investigate', 'Findings', 'Data', 'Relations', 'AI Analyst', 'Settings']
+            'Dashboard', 'Data', 'AI Analyst', 'Settings']
         header = w.workspace.header
         assert header.session_label.text() == 'NO INVESTIGATION'
         w.set_investigation(synthetic())
@@ -54,6 +57,9 @@ def test_navigation_header_and_session_identity():
             button.click(); app.processEvents()
             assert w.pages.currentIndex() == w.navigation.id(button)
             assert header.title.text() == button.text()
+            selected = 0 if w.navigation.id(button) in (1, 2, 4) else w.navigation.id(button)
+            assert w.navigation.checkedId() == selected
+        assert all(w.navigation.button(i).isHidden() for i in (1, 2, 4))
         w.investigation_session.clear_filters()
         assert header.session_label.text() == 'INVESTIGATION 01'
         w.set_investigation(synthetic())
@@ -94,13 +100,77 @@ def test_primary_controls_accessible_at_desktop_sizes():
             w.resize(width, height)
             for _ in range(3): app.processEvents()
             assert (w.width(), w.height()) == (width, height)
-            controls = (*w.navigation.buttons(), w.workspace.run_button, w.workspace.search,
-                        w.workspace.inspector_button, *w.workspace.filters._widgets)
+            controls = (*(w.navigation.button(i) for i in (0, 3, 6, 5)),
+                        w.workspace.run_button, w.workspace.search,
+                        w.workspace.inspector_button, w.workspace.filters_button)
             for widget in controls:
                 assert widget.isVisible()
                 position = widget.mapTo(w, QPoint(0, 0))
                 assert w.rect().contains(position)
                 assert w.rect().contains(position + QPoint(widget.width()-1, widget.height()-1))
-            assert w.overview_page.cards.columns == (2 if width == 640 else 6)
+            assert w.overview_page.cards.columns >= (3 if width == 640 else 6)
+            for kind, button in w.overview_page.metric_buttons.items():
+                assert button.rect().contains(w.overview_page.metrics[kind].geometry())
+        w.workspace.filters_button.click()
+        app.processEvents()
+        assert all(control.isVisible() for control in w.workspace.filters._widgets)
+    finally:
+        w.close()
+
+
+def test_exploration_collapsed_active_filters_and_lifecycle():
+    from test_investigation_context import synthetic
+    app = QApplication.instance() or QApplication([])
+    w = MainWindow()
+    try:
+        w.show(); app.processEvents()
+        assert w.pages.currentWidget() is w.overview_page
+        assert w.workspace.header.title.text() == 'Dashboard'
+        assert not w.workspace.command_panel.isVisible()
+        assert w.dashboard_page.primary_button.text() == 'Add datasets'
+        w.set_investigation(synthetic()); app.processEvents()
+        assert w.workspace.command_panel.isVisible()
+        assert w.workspace.search.placeholderText() == 'Search data'
+        assert not w.workspace.filters.controls_panel.isVisible()
+        s = w.investigation_session
+        s.set_dataset_scope(('remote_access',))
+        assert w.workspace.filters_button.text() == 'Filters (1)'
+        assert w.workspace.filters.active_summary.isVisible()
+        assert w.workspace.filters.active_summary.text() == 'Datasets: remote_access'
+        w.workspace.search.setText('email')
+        assert w.workspace.search_results.count() == 0
+        w.workspace.filters_button.click(); app.processEvents()
+        assert w.workspace.filters.controls_panel.isVisible()
+        w.workspace.filters.clear_button.click()
+        assert w.workspace.filters_button.text() == 'Filters'
+        assert not w.workspace.filters.active_summary.isVisible()
+        s.clear(); app.processEvents()
+        assert not w.workspace.command_panel.isVisible()
+        assert not w.workspace.filters_button.isChecked()
+    finally:
+        w.close()
+
+
+@pytest.mark.parametrize('kind,destination,tab', [
+    ('analyses', 1, 0), ('correlations', 1, 1), ('findings', 2, None),
+    ('entities', 4, 0), ('relations', 4, 1),
+])
+def test_dashboard_metrics_reveal_registered_details(kind, destination, tab):
+    from test_investigation_context import synthetic
+    app = QApplication.instance() or QApplication([])
+    w = MainWindow()
+    try:
+        w.set_investigation(synthetic())
+        before = w.investigation_session.state
+        w.overview_page.metric_buttons[kind].click()
+        assert w.pages.currentIndex() == destination
+        assert w.navigation.checkedId() == 0
+        assert all(w.navigation.button(i).isHidden() for i in (1, 2, 4))
+        if tab is not None:
+            tabs = w.investigation_tabs if destination == 1 else w.relations_tabs
+            assert tabs.currentIndex() == tab
+        assert w.investigation_session.state is before
+        w.navigation.button(0).click()
+        assert w.pages.currentWidget() is w.overview_page
     finally:
         w.close()

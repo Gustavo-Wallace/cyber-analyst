@@ -11,6 +11,15 @@ from .count_labels import count_label
 ATTENTION_ORDER = ('high', 'medium', 'low', 'informational')
 
 
+class MetricButton(QPushButton):
+    """A native action whose labels, rather than empty button text, set its size."""
+    def sizeHint(self):
+        return self.layout().sizeHint() if self.layout() else super().sizeHint()
+
+    def minimumSizeHint(self):
+        return QSize(0, self.sizeHint().height())
+
+
 class ResponsiveGrid(QWidget):
     """Reflow a few native panels; no fixed desktop widths or hidden controls."""
     def __init__(self, widgets, minimum_width, maximum_columns):
@@ -137,6 +146,7 @@ class Highlights(QWidget):
 
 class InvestigationOverview(WorkspacePages):
     target_requested = Signal(object)
+    detail_requested = Signal(str)
 
     def __init__(self, session, legacy, parent=None):
         super().__init__(parent)
@@ -147,14 +157,24 @@ class InvestigationOverview(WorkspacePages):
         layout = QVBoxLayout(self.dashboard)
         layout.setContentsMargins(SPACE['lg'], SPACE['lg'], SPACE['lg'], SPACE['lg'])
         layout.setSpacing(SPACE['lg'])
-        self.metrics, cards = {}, []
-        for name in ('datasets', 'entities', 'relations', 'findings', 'analyses', 'correlations'):
-            card = role(QWidget(), 'metric')
+        self.metrics, self.metric_buttons, cards = {}, {}, []
+        headings = {'datasets': 'Datasets', 'entities': 'Identifiers', 'relations': 'Connections',
+                    'findings': 'Alerts', 'analyses': 'Analysis', 'correlations': 'Data matches'}
+        for name in headings:
+            card = role(MetricButton() if name != 'datasets' else QWidget(), 'metric')
+            if name != 'datasets':
+                card.setAccessibleName('Open ' + headings[name])
+                card.setToolTip('Open ' + headings[name])
+                card.clicked.connect(lambda checked=False, key=name: self.detail_requested.emit(key))
+                self.metric_buttons[name] = card
             box = QVBoxLayout(card)
             box.setContentsMargins(SPACE['md'], SPACE['md'], SPACE['md'], SPACE['md'])
             box.setSpacing(SPACE['xs'])
-            box.addWidget(label(name.capitalize(), 'caption'))
+            heading = label(headings[name], 'caption')
+            heading.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            box.addWidget(heading)
             value = label('0', 'card_value', 'violet' if name == 'findings' else 'cyan')
+            value.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             box.addWidget(value)
             self.metrics[name] = value
             cards.append(card)
@@ -164,18 +184,18 @@ class InvestigationOverview(WorkspacePages):
         layout.addWidget(self.data_summary)
         self.filtered_empty = label('No results are visible in the current view. Adjust the active filters.', 'caption')
         layout.addWidget(self.filtered_empty)
-        self.attention_chart = CountBars('Finding attention', 'No visible findings. Adjust filters or review the other investigation objects.',
+        self.attention_chart = CountBars('Alert attention', 'No visible alerts. Adjust filters or review the other investigation objects.',
                                         'Stored investigation priority, not vulnerability severity.', 'tertiary')
-        self.entity_chart = CountBars('Entity types', 'No visible entities.', 'Distribution of the current investigation view.', 'cyan')
+        self.entity_chart = CountBars('Identifier types', 'No visible identifiers.', 'Distribution of the current investigation view.', 'cyan')
         layout.addWidget(ResponsiveGrid((self.attention_chart, self.entity_chart), 280, 2))
         layout.addWidget(label('Investigation highlights', 'section_title'))
-        self.finding_highlights = Highlights('Findings to review', 'Ordered by attention, then stable ID. Up to three shown.', 'No visible findings to review.')
-        self.entity_highlights = Highlights('Connected entities', 'Ordered by visible direct relations. Up to three shown.', 'No visible entities.')
-        self.correlation_highlights = Highlights('Executed correlations', 'Ordered by common keys, then matched rows. Up to two shown.', 'No visible executed correlations.')
+        self.finding_highlights = Highlights('Alerts to review', 'Highest attention first. Up to three shown.', 'No visible alerts to review.')
+        self.entity_highlights = Highlights('Connected identifiers', 'Most direct connections first. Up to three shown.', 'No visible identifiers.')
+        self.correlation_highlights = Highlights('Dataset matches', 'Most shared keys first. Up to two shown.', 'No visible dataset matches.')
         layout.addWidget(ResponsiveGrid((self.finding_highlights, self.entity_highlights, self.correlation_highlights), 280, 3))
         coverage_panel, box = panel('Dataset coverage', 'Visible investigation objects by source dataset. Select a row to inspect its counts.')
         self.coverage = QTableWidget(0, 5)
-        self.coverage.setHorizontalHeaderLabels(['Dataset', 'Entities', 'Relations', 'Findings', 'Analyses'])
+        self.coverage.setHorizontalHeaderLabels(['Dataset', 'Identifiers', 'Connections', 'Alerts', 'Analysis'])
         self.coverage.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.coverage.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.coverage.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)

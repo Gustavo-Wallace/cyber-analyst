@@ -1,19 +1,23 @@
 """Visão barata da sessão, baseada somente em metadados e resultados existentes."""
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtCharts import QBarCategoryAxis, QBarSet, QChart, QChartView, QHorizontalBarSeries, QValueAxis
 from PySide6.QtWidgets import (
     QAbstractItemView, QGridLayout, QLabel, QScrollArea, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget, QPushButton,
 )
 
 from cyber_analyst.data.dataset_collection import DatasetCollection
 from cyber_analyst.data.session_results import SessionResults
 from .theme import COLORS, SPACE, label as themed_label, role, table_style
+from .count_labels import count_label
 
 
 class DashboardPage(QWidget):
+    primary_requested = Signal()
+    manual_requested = Signal()
+
     def __init__(self, collection: DatasetCollection, results: SessionResults) -> None:
         super().__init__()
         self.collection = collection
@@ -35,13 +39,23 @@ class DashboardPage(QWidget):
         self.empty_panel = QWidget()
         empty_layout = QVBoxLayout(self.empty_panel)
         empty_layout.addStretch()
-        self.empty_label = themed_label('No active investigation', 'section_title')
+        self.empty_label = themed_label('Analyze your cybersecurity data', 'section_title')
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(self.empty_label)
-        caption = themed_label('Load datasets to begin. Manual session results remain available before an investigation is completed.', 'caption')
+        caption = themed_label('', 'caption')
         caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_caption = caption
         empty_layout.addWidget(caption)
+        self.primary_button = role(QPushButton('Add datasets'), 'primary')
+        self.primary_button.clicked.connect(self.primary_requested)
+        empty_layout.addWidget(self.primary_button, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.readiness = themed_label('', 'caption')
+        self.readiness.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(self.readiness)
+        self.details_button = role(QPushButton('View dataset details'), 'secondary')
+        self.details_button.setCheckable(True)
+        self.details_button.toggled.connect(lambda visible: self.body.setVisible(visible))
+        empty_layout.addWidget(self.details_button, 0, Qt.AlignmentFlag.AlignHCenter)
         empty_layout.addStretch()
         layout.addWidget(self.empty_panel, 1)
         self.body = QWidget()
@@ -84,6 +98,9 @@ class DashboardPage(QWidget):
         body_layout.addWidget(QLabel("Última correlação"))
         self.correlation_label = QLabel()
         body_layout.addWidget(self.correlation_label)
+        self.manual_button = role(QPushButton('Analyze manually'), 'secondary')
+        self.manual_button.clicked.connect(self.manual_requested)
+        body_layout.addWidget(self.manual_button, 0, Qt.AlignmentFlag.AlignLeft)
         for label in (self.analysis_label, self.correlation_label):
             label.setTextFormat(Qt.TextFormat.PlainText)
             label.setWordWrap(True)
@@ -93,8 +110,18 @@ class DashboardPage(QWidget):
     @Slot()
     def refresh(self) -> None:
         datasets = self.collection.values()
-        self.empty_panel.setVisible(not datasets)
-        self.body.setVisible(bool(datasets))
+        self.empty_panel.show()
+        self.empty_label.setText('Datasets ready' if datasets else 'Analyze your cybersecurity data')
+        self.empty_caption.setText(
+            count_label(len(datasets), 'dataset') + ' | ' +
+            count_label(sum(d.row_count for d in datasets), 'row', number_format=',') +
+            '\nAutomatic analysis has not run yet.' if datasets else
+            'Add one or more datasets and Cyber Analyst will profile, analyze, correlate and '
+            'build the investigation dashboard automatically.')
+        self.details_button.setVisible(bool(datasets))
+        if not datasets:
+            self.details_button.setChecked(False)
+        self.body.setVisible(bool(datasets) and self.details_button.isChecked())
         self.dataset_table.setRowCount(len(datasets))
         self.kpis["datasets"].setText(str(len(datasets)))
         self.kpis["rows"].setText(str(sum(dataset.row_count for dataset in datasets)))
@@ -126,6 +153,15 @@ class DashboardPage(QWidget):
                 f"Em comum: {summary.common} · Somente A: {summary.only_a} · Somente B: {summary.only_b}\n"
                 f"Linhas correlacionadas: {summary.matched_rows}"
             )
+
+    def set_primary_action(self, text, enabled, tooltip):
+        self.primary_button.setText(text)
+        self.primary_button.setEnabled(enabled)
+        self.primary_button.setToolTip(tooltip)
+        self.readiness.setText('Set up local AI in Settings to analyze.'
+                               if len(self.collection) and not enabled and
+                               tooltip == 'No investigation pipeline configured' else '')
+        self.readiness.setVisible(bool(self.readiness.text()))
 
     def _update_chart(self, datasets) -> None:
         chart = QChart()

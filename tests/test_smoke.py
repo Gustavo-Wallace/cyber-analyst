@@ -40,7 +40,7 @@ def test_main_window(monkeypatch):
         assert window.centralWidget() is not None
         assert window.minimumWidth() == 640
         assert window.minimumHeight() == 400
-        titles = ['Overview','Investigate','Findings','Data','Relations','Settings','AI Analyst']
+        titles = ['Dashboard','Investigate','Findings','Data','Relations','Settings','AI Analyst']
         buttons = window.navigation.buttons()
         assert [button.text() for button in buttons] == titles
         assert window.pages.count() == 7
@@ -49,16 +49,16 @@ def test_main_window(monkeypatch):
         window.show()
         app.processEvents()
         for index in (1, 2, 3, 4, 5, 6, 0):
-            QTest.mouseClick(buttons[index], Qt.MouseButton.LeftButton)
+            buttons[index].click()
             assert window.pages.currentIndex() == index
             assert [button.isChecked() for button in buttons] == [
-                i == index for i in range(len(titles))
+                i == (0 if index in (1, 2, 4) else index) for i in range(len(titles))
             ]
         for width, height in ((640, 400), (1400, 900)):
             window.resize(width, height)
             app.processEvents()
             assert window.pages.width() > 0
-            for button in buttons:
+            for button in (buttons[i] for i in (0, 3, 6, 5)):
                 assert button.parentWidget().rect().contains(button.geometry())
     finally:
         window.close()
