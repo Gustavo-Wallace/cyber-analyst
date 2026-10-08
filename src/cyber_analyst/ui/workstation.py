@@ -37,7 +37,7 @@ class WorkspaceHeader(QWidget):
             'Dashboard': 'Explore your data, review alerts and ask AI Analyst.',
             'Investigate': 'Browse executed analyses and correlations.',
             'Findings': 'Review selected deterministic evidence and its provenance.',
-            'Data': 'Manage source datasets and inspect their metadata.',
+            'Data': 'Browse loaded datasets and search their values.',
             'Relations': 'Explore entities and observed co-occurrences.',
             'AI Analyst': 'Ask grounded questions about the active investigation.',
             'Settings': 'Configure the local runtime and model.',
@@ -122,6 +122,8 @@ class Workspace(QWidget):
         command_layout.addWidget(self.filters)
         layout.addWidget(self.command_panel)
         self.command_panel.hide()
+        self._exploration_visible = True
+        self._investigation_active = False
         scroll=QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setMinimumSize(0,0)
@@ -142,9 +144,17 @@ class Workspace(QWidget):
         self.commands.setColumnStretch(0, 1)
         self._compact_commands = compact
 
+    def set_exploration_visible(self, visible):
+        self._exploration_visible = visible
+        self._update_exploration_visibility()
+
+    def _update_exploration_visibility(self):
+        self.command_panel.setVisible(self._exploration_visible and self._investigation_active)
+
     def refresh_exploration(self, session):
         active = session.context is not None
-        self.command_panel.setVisible(active)
+        self._investigation_active = active
+        self._update_exploration_visibility()
         state = session.state
         count = sum(bool(values) for values in (state.dataset_scope, state.entity_types, state.attention_levels)) if active else 0
         self.filters_button.setText(f'Filters ({count})' if count else 'Filters')

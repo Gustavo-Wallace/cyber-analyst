@@ -20,7 +20,7 @@ def test_initial_and_cancel(page, monkeypatch):
     assert page.dataset_list.count() == 0
     assert page.add_button.isEnabled()
     assert not page.remove_button.isEnabled()
-    assert page.add_button.text() == "Adicionar CSV"
+    assert page.add_button.text() == 'Add datasets'
     assert page.empty_label.isVisible()
     assert not page.details.isVisible()
     monkeypatch.setattr(QFileDialog, "getOpenFileNames", lambda *args: ([], ""))
@@ -38,9 +38,9 @@ def test_load_from_dialog(page, tmp_path, monkeypatch):
     page.add_button.click()
     wait_for_load(page)
     assert page.dataset.name == "events.csv"
-    assert str(path) in page.summary.text()
-    assert "Nome: events.csv" in page.summary.text()
-    assert "Linhas: 2    Colunas: 2" in page.summary.text()
+    assert str(path) == page.summary.toolTip()
+    assert 'events.csv' in page.summary.text()
+    assert '2 rows | 2 columns' in page.summary.text()
     assert page.summary.textFormat() == Qt.TextFormat.PlainText
     assert page.schema_table.item(0, 0).text() == "id"
     assert page.schema_table.item(0, 1).text() == "Int64"
@@ -48,6 +48,8 @@ def test_load_from_dialog(page, tmp_path, monkeypatch):
     assert page.preview_table.horizontalHeaderItem(1).text() == "host"
     assert page.preview_table.item(0, 1).text() == "<b>alpha</b>"
     assert page.preview_table.item(1, 1).text() == ""
+    assert page.schema_table.isHidden()
+    page.schema_toggle.click()
     for table in (page.schema_table, page.preview_table):
         assert table.editTriggers() == QAbstractItemView.EditTrigger.NoEditTriggers
         assert not table.isSortingEnabled()

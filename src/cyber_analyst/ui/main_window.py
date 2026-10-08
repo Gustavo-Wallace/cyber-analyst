@@ -40,6 +40,7 @@ from .theme import SPACE, apply_theme, role, label
 
 class MainWindow(QMainWindow):
     def _collection_changed(self) -> None:
+        self.datasets_page.refresh_collection()
         self.session_results.invalidate(self.collection)
         self.analyses_page.refresh_datasets()
         self.correlations_page.refresh_datasets()
@@ -115,6 +116,7 @@ class MainWindow(QMainWindow):
         self.investigate_page.addTab(self.analyses_page, 'Analyses')
         self.investigate_page.addTab(self.correlations_page, 'Correlations')
         self.investigation_session = InvestigationSession(self)
+        self.datasets_page.bind_session(self.investigation_session)
         self.analysis_explorer = InvestigationAnalysisPage(self.investigation_session, self.investigate_page)
         self.correlation_explorer = InvestigationCorrelationPage(self.investigation_session)
         self.investigation_tabs = QTabWidget()
@@ -157,7 +159,7 @@ class MainWindow(QMainWindow):
         self.pages.setCurrentIndex(0)
         layout.addWidget(sidebar)
         self.workspace = Workspace(self.pages)
-        self.pages.currentChanged.connect(lambda index: self.workspace.header.set_page(self.navigation.button(index).text()))
+        self.pages.currentChanged.connect(self._workspace_page_changed)
         self.overview_page.target_requested.connect(self._open_analyst_reference)
         self.overview_page.detail_requested.connect(self._open_dashboard_detail)
         self.dashboard_page.manual_requested.connect(lambda: self._show_page(1))
@@ -202,6 +204,10 @@ class MainWindow(QMainWindow):
             if heading.objectName() == 'pageTitle':
                 heading.hide()
         apply_theme(self)
+
+    def _workspace_page_changed(self, index):
+        self.workspace.header.set_page(self.navigation.button(index).text())
+        self.workspace.set_exploration_visible(self.pages.currentWidget() is not self.datasets_page)
 
     def _show_page(self, index):
         # Specialist routes keep Dashboard selected without becoming sidebar entries.

@@ -151,6 +151,67 @@ def test_exploration_collapsed_active_filters_and_lifecycle():
         w.close()
 
 
+def test_data_hides_exploration_without_changing_filters_focus_or_controls():
+    from test_investigation_context import synthetic
+    app = QApplication.instance() or QApplication([])
+    w = MainWindow()
+    try:
+        w.show(); w.set_investigation(synthetic())
+        session = w.investigation_session
+        session.set_dataset_scope(('remote_access',))
+        session.set_entity_types(('username',))
+        session.set_attention_levels(('medium',))
+        session.navigate(next(iter(session.search('ana'))))
+        w.workspace.search.setText('ana')
+        w.workspace.filters_button.click()
+        w.workspace.inspector_button.click()
+        app.processEvents()
+        before = (session.result, session.context, session.state, session.view)
+        inspector = w.context_dock.widget()
+        details = w.context_inspector.details.toPlainText()
+        w.navigation.button(3).click(); app.processEvents()
+        assert not w.workspace.command_panel.isVisible()
+        assert not w.workspace.filters.isVisible()
+        assert all(a is b for a, b in zip(before, (
+            session.result, session.context, session.state, session.view)))
+        assert w.workspace.search.text() == 'ana'
+        assert w.workspace.filters_button.isChecked()
+        assert w.context_dock.isVisible() and w.context_dock.widget() is inspector
+        assert w.context_inspector.details.toPlainText() == details
+        w.navigation.button(0).click(); app.processEvents()
+        assert w.workspace.command_panel.isVisible()
+        assert w.workspace.filters.controls_panel.isVisible()
+        assert w.workspace.filters_button.text() == 'Filters (3)'
+        assert all(a is b for a, b in zip(before, (
+            session.result, session.context, session.state, session.view)))
+        w.workspace.search.setText('username')
+        assert w.workspace.search_results.count() == 1
+    finally:
+        w.close()
+
+
+def test_investigation_updates_do_not_reveal_toolbar_on_data():
+    from test_investigation_context import synthetic
+    app = QApplication.instance() or QApplication([])
+    w = MainWindow()
+    try:
+        w.show(); w.navigation.button(3).click()
+        w.set_investigation(synthetic()); app.processEvents()
+        assert not w.workspace.command_panel.isVisible()
+        w.investigation_session.set_dataset_scope(('remote_access',))
+        assert not w.workspace.command_panel.isVisible()
+        w.set_investigation(synthetic())
+        assert not w.workspace.command_panel.isVisible()
+        w.navigation.button(0).click(); app.processEvents()
+        assert w.workspace.command_panel.isVisible()
+        w.investigation_session.clear()
+        assert not w.workspace.command_panel.isVisible()
+        w.navigation.button(3).click(); w.navigation.button(0).click()
+        assert not w.workspace.command_panel.isVisible()
+    finally:
+        w.close()
+
+
 @pytest.mark.parametrize('kind,destination,tab', [
     ('analyses', 1, 0), ('correlations', 1, 1), ('findings', 2, None),
     ('entities', 4, 0), ('relations', 4, 1),
@@ -162,9 +223,12 @@ def test_dashboard_metrics_reveal_registered_details(kind, destination, tab):
     try:
         w.set_investigation(synthetic())
         before = w.investigation_session.state
+        w.navigation.button(3).click()
+        assert w.workspace.command_panel.isHidden()
         w.overview_page.metric_buttons[kind].click()
         assert w.pages.currentIndex() == destination
         assert w.navigation.checkedId() == 0
+        assert not w.workspace.command_panel.isHidden()
         assert all(w.navigation.button(i).isHidden() for i in (1, 2, 4))
         if tab is not None:
             tabs = w.investigation_tabs if destination == 1 else w.relations_tabs
@@ -172,5 +236,6 @@ def test_dashboard_metrics_reveal_registered_details(kind, destination, tab):
         assert w.investigation_session.state is before
         w.navigation.button(0).click()
         assert w.pages.currentWidget() is w.overview_page
+        assert not w.workspace.command_panel.isHidden()
     finally:
         w.close()
