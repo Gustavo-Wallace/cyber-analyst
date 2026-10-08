@@ -7,6 +7,7 @@ from PySide6.QtCharts import (QChart, QChartView, QPieSeries, QBarSeries, QBarSe
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QGridLayout,
     QPushButton, QToolTip, QSizePolicy)
 from .theme import COLORS, SPACE, DATA_PALETTE, ATTENTION_COLORS, data_colors, label, role
+from .presentation_labels import format_number
 
 
 def point_color(spec, point):
@@ -122,7 +123,7 @@ class VisualPanel(QWidget):
                     grid.addWidget(button, i, 0)
                 else:
                     grid.addWidget(label(point.label, 'caption'), i, 0)
-                    value = label(str(point.value), 'body')
+                    value = label(format_number(point.value), 'body')
                     value.setToolTip(str(point.value))
                     grid.addWidget(value, i, 1)
             grid.setColumnStretch(0, 1)

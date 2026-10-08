@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QStackedWidget, QTa
     QTableWidgetItem, QAbstractItemView, QHeaderView, QSplitter)
 from cyber_analyst.context import SearchResult
 from .theme import COLORS
+from .presentation_labels import human_label
 
 
 def text(value):
@@ -82,10 +83,10 @@ class InvestigationAnalysisPage(QStackedWidget):
             self.selector.setRowCount(len(ids))
             for row, pair in enumerate(ids):
                 step = s.context.analyses[pair]
-                for col, value in enumerate((pair[0], step.operation, step.title)):
+                for col, value in enumerate((pair[0], human_label(step.operation), step.title)):
                     item = QTableWidgetItem(value)
                     item.setData(Qt.ItemDataRole.UserRole, pair)
-                    item.setToolTip(value + '\n' + pair[1])
+                    item.setToolTip((step.operation if col == 1 else value) + '\n' + pair[1])
                     self.selector.setItem(row, col, item)
                 if selected == pair:
                     self.selector.setCurrentCell(row, 0)
@@ -108,8 +109,8 @@ class InvestigationAnalysisPage(QStackedWidget):
         if selected not in ids:
             return
         step = s.context.analyses[selected]
-        self.heading.setText(f'{selected[0]} | {step.operation}\n{step.title}' + ('\nNo result rows.' if not step.rows else ''))
-        self.heading.setToolTip(selected[1])
+        self.heading.setText(f'{selected[0]} | {human_label(step.operation)}\n{step.title}' + ('\nNo result rows.' if not step.rows else ''))
+        self.heading.setToolTip(selected[1] + '\n' + step.operation)
         self.result_table.setColumnCount(len(step.columns))
         self.result_table.setHorizontalHeaderLabels(step.columns)
         self.result_table.setRowCount(len(step.rows))

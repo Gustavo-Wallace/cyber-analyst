@@ -6,6 +6,7 @@ from cyber_analyst.analyst import AnalystReference
 from cyber_analyst.context.next_steps import NextStepsService
 from .analyst_references import REFERENCE_UNAVAILABLE
 from .theme import SPACE, label, role
+from .presentation_labels import finding_supporting_label
 
 class NextStepButton(QPushButton):
     def sizeHint(self):
@@ -56,7 +57,8 @@ class NextStepsWidget(QWidget):
         box = QVBoxLayout(button)
         box.setContentsMargins(SPACE['sm'], SPACE['xs'], SPACE['sm'], SPACE['xs'])
         box.setSpacing(2)
-        for text, kind, tone in ((step.title, 'body', 'cyan'), (step.supporting_label, 'caption', None)):
+        supporting = finding_supporting_label(step.supporting_label) if step.target_kind == 'finding' else step.supporting_label
+        for text, kind, tone in ((step.title, 'body', 'cyan'), (supporting, 'caption', None)):
             text_label = label(text, kind, tone)
             text_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             text_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)

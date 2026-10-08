@@ -9,6 +9,7 @@ from datetime import date
 import json
 import math
 from cyber_analyst.analyst import AnalystReference
+from .presentation_labels import human_label
 
 MAX_VISUALS = 6
 MAX_ANALYSIS_VISUALS = 3
@@ -56,10 +57,6 @@ def category_text(value):
     if value is None:
         return '(null)'
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-
-
-def human_label(value):
-    return value.replace('_', ' ').strip().capitalize()
 
 
 def _number(value):

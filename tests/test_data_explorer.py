@@ -48,6 +48,15 @@ def test_empty_state_hides_technical_surfaces(page):
     assert page.add_button.isEnabled()
 
 
+def test_null_and_empty_tooltips_distinguish_values_without_changing_cells():
+    from cyber_analyst.ui.datasets_page import value_item
+    null, empty = value_item(None), value_item('')
+    assert null.text() == empty.text() == ''
+    assert null.toolTip() == '(null)' and empty.toolTip() == '(empty string)'
+    assert null.data(Qt.ItemDataRole.UserRole) is None
+    assert empty.data(Qt.ItemDataRole.UserRole) == ''
+
+
 def test_loaded_list_readiness_selection_and_collapsed_schema(page, tmp_path):
     a,b = load_fixtures(page, tmp_path)
     assert page.dataset_list.count() == 2

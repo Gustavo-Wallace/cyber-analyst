@@ -58,14 +58,20 @@ def test_settings_apply_transactional(config):
     try:
         assert w.investigation_runner.pipeline is injected
         assert w.settings_page.status.text()=='Not configured'
+        assert w.settings_page.apply_button.text() == 'Apply settings'
+        assert w.settings_page.executable.toolTip() == str(config.llama_executable)
+        assert w.settings_page.model.toolTip() == str(config.model_path)
         for entry in synthetic().datasets:w.collection.add(entry.dataset)
         w._collection_changed()
-        w.settings_page.apply()
+        w.navigation.button(5).click()
+        assert w.workspace.run_button.isHidden() and w.workspace.command_panel.isHidden()
+        w.settings_page.apply_button.click()
         assert w.settings_page.status.text()=='Valid'
         pipeline=w.investigation_runner.pipeline
         assert w.analyst_runner.pipeline is pipeline
         assert pipeline is not injected and not pipeline.runtime.has_process
         assert w.workspace.run_button.isEnabled()
+        assert w.workspace.run_button.isHidden()
         w.settings_page.model.setText('missing.gguf');w.settings_page.apply()
         assert w.settings_page.status.text().startswith('Invalid')
         assert w.investigation_runner.pipeline is pipeline

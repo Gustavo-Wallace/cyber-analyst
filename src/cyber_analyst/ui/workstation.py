@@ -2,6 +2,7 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit, QPushButton, QScrollArea, QListWidget, QPlainTextEdit, QStackedWidget, QLayout
 from .investigation_filters import InvestigationFilters
 from .theme import SPACE, role, label
+from .presentation_labels import human_label
 
 
 class WorkspaceHeader(QWidget):
@@ -123,6 +124,7 @@ class Workspace(QWidget):
         layout.addWidget(self.command_panel)
         self.command_panel.hide()
         self._exploration_visible = True
+        self._search_visible = True
         self._investigation_active = False
         scroll=QScrollArea()
         scroll.setWidgetResizable(True)
@@ -135,14 +137,27 @@ class Workspace(QWidget):
 
     def _reflow_commands(self):
         compact = self.width() < 360
-        if compact == self._compact_commands:
+        mode = (compact, self._search_visible)
+        if mode == self._compact_commands:
             return
         for col in range(3): self.commands.setColumnStretch(col, 0)
-        self.commands.addWidget(self.search, 0, 0, 1, 2 if compact else 1)
-        self.commands.addWidget(self.filters_button, 1 if compact else 0, 0 if compact else 1)
-        self.commands.addWidget(self.inspector_button, 1 if compact else 0, 1 if compact else 2)
-        self.commands.setColumnStretch(0, 1)
-        self._compact_commands = compact
+        if self._search_visible:
+            self.commands.addWidget(self.search, 0, 0, 1, 2 if compact else 1)
+            self.commands.addWidget(self.filters_button, 1 if compact else 0, 0 if compact else 1)
+            self.commands.addWidget(self.inspector_button, 1 if compact else 0, 1 if compact else 2)
+            self.commands.setColumnStretch(0, 1)
+        else:
+            self.commands.removeWidget(self.search)
+            self.commands.addWidget(self.filters_button, 0, 0)
+            self.commands.addWidget(self.inspector_button, 0, 1)
+            self.commands.setColumnStretch(2, 1)
+        self._compact_commands = mode
+
+    def set_search_visible(self, visible):
+        self._search_visible = visible
+        self.search.setVisible(visible)
+        self.search_results.hide()
+        self._reflow_commands()
 
     def set_exploration_visible(self, visible):
         self._exploration_visible = visible
@@ -196,15 +211,16 @@ class ContextInspector(QWidget):
                 text='\n'.join(lines)
             elif f.dataset_name is not None:
                 d=context.dataset(f.dataset_name)
-                text=f'{d.dataset_name}\nEntities: {len(d.entity_ids)}\nRelations: {len(d.relation_ids)}\nFindings: {len(d.finding_ids)}\nAnalyses: {len(d.analysis_result_ids)}'
+                text=f'{d.dataset_name}\nIdentifiers: {len(d.entity_ids)}\nConnections: {len(d.relation_ids)}\nAlerts: {len(d.finding_ids)}\nAnalyses: {len(d.analysis_result_ids)}'
             elif f.finding_id is not None:
                 finding=context.findings[f.finding_id]
-                lines=[finding.finding_id,'Attention: '+finding.attention_level]
-                lines.extend(f'{e.evidence_id}\nDataset: {e.dataset_name}\nOperation: {e.operation}' for e in context.evidence_for(f.finding_id))
+                lines=['Alert', 'Attention: '+finding.attention_level]
+                lines.extend(f'Dataset: {e.dataset_name}\nOperation: {human_label(e.operation)}\nEvidence ID: {e.evidence_id}' for e in context.evidence_for(f.finding_id))
+                lines.append(finding.finding_id)
                 text='\n'.join(lines)
             elif f.analysis is not None:
                 a=f.analysis;step=context.analyses[(a.dataset_name,a.analysis_id)]
-                text=f'{a.dataset_name}\n{a.analysis_id}\nOperation: {step.operation}\n{step.title}\nColumns: '+', '.join(step.columns)
+                text=f'{a.dataset_name}\n{step.title}\nOperation: {human_label(step.operation)}\nColumns: '+', '.join(step.columns)+f'\n{a.analysis_id}'
             elif f.correlation_id is not None:
                 c = context.correlations[f.correlation_id]
                 m = c.correlation_result.summary

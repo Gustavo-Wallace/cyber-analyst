@@ -254,12 +254,13 @@ def test_completion_does_not_steal_focus_after_navigating_away(setup, return_to_
     w.navigation.button(0).click()
     if return_to_analyst:
         w.navigation.button(6).click()
-    w.workspace.search.setFocus()
+    control = w.workspace.filters_button if return_to_analyst else w.workspace.search
+    control.setFocus()
     provider.release.set()
     wait(app, lambda: not w.analyst_runner.running)
     app.processEvents()
     assert w.pages.currentWidget() is (page if return_to_analyst else w.overview_page)
-    assert w.workspace.search.hasFocus() and not page.question.hasFocus()
+    assert control.hasFocus() and not page.question.hasFocus()
 
 
 def test_source_frames_and_files_unchanged_by_navigation(setup, tmp_path, monkeypatch):

@@ -210,7 +210,8 @@ def test_factory_preserves_chart_values_and_shapes(window, source, kind):
         if kind == 'horizontal_bar':
             assert panel.bars.points == spec.series[0].points
         elif kind == 'metrics':
-            assert '1.234567891234' in [label.text() for label in panel.findChildren(QLabel)]
+            assert '1.23456789123' in [label.text() for label in panel.findChildren(QLabel)]
+            assert '1.234567891234' in [label.toolTip() for label in panel.findChildren(QLabel)]
         else:
             series = panel.chart_view.chart().series()[0]
             if kind == 'histogram':
@@ -249,4 +250,41 @@ def test_presentation_variety_does_not_replace_equivalent_scope(window):
     window.set_investigation(context_with_steps(sources))
     kinds = [s.kind for s in window.overview_page.visual_specs if s.key.startswith('analysis:')]
     assert kinds == ['donut','horizontal_bar','metrics']
+
+
+@pytest.mark.parametrize('value,display', [
+    (21.549999999999997, '21.55'), (0.30000000000000004, '0.3'),
+    (1.234567891234, '1.23456789123'), (0, '0'), (42, '42'),
+    (123456789012345678901234, '123456789012345678901234'),
+    (-0.0, '0'), (1e-300, '1e-300'), (1e300, '1e+300'),
+    (float('nan'), 'NaN'), (float('inf'), 'Infinity'), (float('-inf'), '-Infinity'),
+])
+def test_numeric_presentation(value, display):
+    from cyber_analyst.ui.presentation_labels import format_number
+    assert format_number(value) == display
+
+
+def test_numeric_summary_display_preserves_exact_results_and_precision(window):
+    from PySide6.QtWidgets import QLabel
+    number = 21.549999999999997
+    source = step('numeric_summary', ('column','minimum','maximum','mean','median'),
+                  (('amount', 2, 42, number, 12.5),), identifier='summary')
+    result = context_with_steps((source,))
+    window.set_investigation(result)
+    session = window.investigation_session
+    panel = window.overview_page.visual_panels['analysis:directory:summary']
+    labels = panel.findChildren(QLabel)
+    assert '21.55' in [label.text() for label in labels]
+    assert str(number) in [label.toolTip() for label in labels]
+    assert '2' in [label.text() for label in labels] and '42' in [label.text() for label in labels]
+    assert panel.counts == (('Amount | Minimum',2), ('Amount | Maximum',42),
+                            ('Amount | Mean',number), ('Amount | Median',12.5))
+    before = (session.result, session.context, session.state, session.view)
+    window.overview_page.refresh()
+    assert all(a is b for a,b in zip(before, (session.result, session.context, session.state, session.view)))
+    assert session.context.analyses['directory','summary'] is source
+    assert source.rows[0][3] == number
+    panel.open_button.click()
+    # Advanced result table keeps the unrounded source value.
+    assert window.analysis_explorer.result_table.item(0,3).text() == str(number)
 

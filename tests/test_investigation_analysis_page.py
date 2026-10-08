@@ -31,7 +31,11 @@ def test_result_rendering(window,op,columns,rows,kind):
             from cyber_analyst.ui.investigation_analysis_page import text
             assert p.result_table.item(i,j).text()==text(value)
     assert window.investigation_session.state.focus.analysis.dataset_name=='directory'
-    assert op in window.context_inspector.details.toPlainText()
+    from cyber_analyst.ui.presentation_labels import human_label
+    assert human_label(op) in window.context_inspector.details.toPlainText()
+    assert p.selector.item(0, 1).text() == human_label(op)
+    assert p.selector.item(0, 1).toolTip().splitlines()[0] == op
+    assert p.heading.toolTip().splitlines()[1] == op
 
 
 def test_filters_lifecycle(window):

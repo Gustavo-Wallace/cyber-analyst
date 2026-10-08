@@ -130,7 +130,7 @@ def test_exploration_collapsed_active_filters_and_lifecycle():
         assert w.dashboard_page.primary_button.text() == 'Add datasets'
         w.set_investigation(synthetic()); app.processEvents()
         assert w.workspace.command_panel.isVisible()
-        assert w.workspace.search.placeholderText() == 'Search data'
+        assert w.workspace.search.placeholderText() == 'Search investigation'
         assert not w.workspace.filters.controls_panel.isVisible()
         s = w.investigation_session
         s.set_dataset_scope(('remote_access',))
@@ -190,12 +190,13 @@ def test_data_hides_exploration_without_changing_filters_focus_or_controls():
         w.close()
 
 
-def test_investigation_updates_do_not_reveal_toolbar_on_data():
+@pytest.mark.parametrize('destination', [3, 5])
+def test_investigation_updates_do_not_reveal_toolbar_on_data_or_settings(destination):
     from test_investigation_context import synthetic
     app = QApplication.instance() or QApplication([])
     w = MainWindow()
     try:
-        w.show(); w.navigation.button(3).click()
+        w.show(); w.navigation.button(destination).click()
         w.set_investigation(synthetic()); app.processEvents()
         assert not w.workspace.command_panel.isVisible()
         w.investigation_session.set_dataset_scope(('remote_access',))
@@ -208,6 +209,110 @@ def test_investigation_updates_do_not_reveal_toolbar_on_data():
         assert not w.workspace.command_panel.isVisible()
         w.navigation.button(3).click(); w.navigation.button(0).click()
         assert not w.workspace.command_panel.isVisible()
+    finally:
+        w.close()
+
+
+@pytest.mark.parametrize('destination', [0, 1, 2, 4, 3, 6])
+def test_settings_hides_shell_actions_and_restores_destination_without_mutating_state(destination):
+    from test_investigation_context import synthetic
+    app = QApplication.instance() or QApplication([])
+    w = MainWindow(investigation_pipeline=object())
+    try:
+        w.show(); w.set_investigation(synthetic())
+        for entry in w.investigation_session.result.datasets:
+            w.collection.add(entry.dataset)
+        w._collection_changed()
+        session = w.investigation_session
+        session.set_dataset_scope(('remote_access',))
+        session.set_entity_types(('username',))
+        session.navigate(next(iter(session.search('ana'))))
+        w.workspace.search.setText('ana')
+        w.workspace.filters_button.setChecked(True)
+        w.workspace.inspector_button.setChecked(True)
+        app.processEvents()
+        before = (session.result, session.context, session.state, session.view)
+        details = w.context_inspector.details.toPlainText()
+        apply_action = w.settings_page.apply_button
+        w.navigation.button(5).click(); app.processEvents()
+        assert not w.workspace.search.isVisible()
+        assert not w.workspace.filters_button.isVisible()
+        assert not w.workspace.inspector_button.isVisible()
+        assert w.workspace.run_button.isHidden()
+        assert apply_action.isVisible() and apply_action.isEnabled()
+        assert apply_action.text() == 'Apply settings'
+        assert w.context_dock.isVisible() and w.context_inspector.details.toPlainText() == details
+        # Runner/session refreshes must not expose hidden Settings shell controls.
+        w._update_run_controls(); w._investigation_changed(); app.processEvents()
+        assert w.workspace.run_button.isHidden() and w.workspace.command_panel.isHidden()
+        assert all(a is b for a,b in zip(before, (session.result,session.context,session.state,session.view)))
+        w.navigation.button(destination).click(); app.processEvents()
+        assert w.settings_page.apply_button is apply_action
+        assert w.workspace.run_button.isVisible() and w.workspace.run_button.text() == 'Analyze again'
+        assert w.workspace.command_panel.isVisible() == (destination != 3)
+        assert w.workspace.search.isVisible() == (destination not in (3,6))
+        assert w.workspace.filters_button.isVisible() == (destination != 3)
+        assert w.workspace.inspector_button.isVisible() == (destination != 3)
+        assert w.workspace.filters_button.isChecked() and w.workspace.inspector_button.isChecked()
+        assert w.workspace.search.text() == 'ana'
+        assert all(a is b for a,b in zip(before, (session.result,session.context,session.state,session.view)))
+        assert w.context_inspector.details.toPlainText() == details
+    finally:
+        w.close()
+
+
+def test_analyst_hides_only_search_and_preserves_investigation_controls():
+    from test_investigation_context import synthetic
+    app = QApplication.instance() or QApplication([])
+    w = MainWindow()
+    try:
+        w.show(); w.set_investigation(synthetic())
+        session = w.investigation_session
+        session.set_dataset_scope(('remote_access',))
+        w.workspace.search.setText('ana')
+        w.workspace.filters_button.click()
+        before = (session.result, session.context, session.state, session.view)
+        w.navigation.button(6).click(); app.processEvents()
+        assert w.workspace.search.isHidden() and w.workspace.search_results.isHidden()
+        assert w.workspace.filters_button.isVisible() and w.workspace.inspector_button.isVisible()
+        assert w.workspace.filters.controls_panel.isVisible()
+        assert w.analyst_page.question.isVisible()
+        w.workspace.search.setText('username')
+        assert w.workspace.search_results.isHidden()
+        session.clear_filters()
+        assert w.workspace.search.isHidden()
+        session.set_dataset_scope(('remote_access',))
+        after_filtering = (session.result, session.context, session.state, session.view)
+        w.navigation.button(0).click(); app.processEvents()
+        assert w.workspace.search.isVisible() and w.workspace.search.text() == 'username'
+        assert w.workspace.filters.controls_panel.isVisible()
+        assert all(a is b for a, b in zip(after_filtering, (
+            session.result, session.context, session.state, session.view)))
+        assert session.result is before[0] and session.context is before[1]
+        assert session.state == before[2] and session.view == before[3]
+    finally:
+        w.close()
+
+
+def test_primary_workflow_has_one_empty_page_action():
+    from test_investigation_context import synthetic
+    app = QApplication.instance() or QApplication([])
+    w = MainWindow(investigation_pipeline=object())
+    try:
+        w.show(); app.processEvents()
+        assert w.workspace.run_button.isHidden()
+        assert w.dashboard_page.primary_button.isVisible()
+        assert w.dashboard_page.primary_button.text() == 'Add datasets'
+        w.dashboard_page.primary_button.click(); app.processEvents()
+        assert w.workspace.run_button.isHidden() and w.datasets_page.add_button.isVisible()
+        for entry in synthetic().datasets:
+            w.collection.add(entry.dataset)
+        w._collection_changed()
+        assert not w.workspace.run_button.isHidden() and w.workspace.run_button.text() == 'Analyze'
+        w.navigation.button(0).click()
+        assert w.workspace.run_button.isHidden() and w.dashboard_page.primary_button.text() == 'Analyze'
+        w.set_investigation(synthetic())
+        assert not w.workspace.run_button.isHidden() and w.workspace.run_button.text() == 'Analyze again'
     finally:
         w.close()
 

@@ -3,9 +3,10 @@ from PySide6.QtCore import Qt, QSignalBlocker
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
-    QAbstractItemView, QHeaderView, QPlainTextEdit, QSplitter,
+    QAbstractItemView, QHeaderView, QPlainTextEdit, QSplitter, QToolButton, QSizePolicy,
 )
 from cyber_analyst.context import SearchResult
+from .presentation_labels import human_label
 
 
 class FindingsPage(QWidget):
@@ -46,10 +47,22 @@ class FindingsPage(QWidget):
         self.neutral = QLabel('Select a visible finding to inspect its evidence.')
         self.neutral.setWordWrap(True)
         evidence_layout.addWidget(self.neutral)
+        self.evidence_summary = QLabel()
+        self.evidence_summary.setTextFormat(Qt.TextFormat.PlainText)
+        self.evidence_summary.setWordWrap(True)
+        self.evidence_summary.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        evidence_layout.addWidget(self.evidence_summary)
+        self.evidence_toggle = QToolButton()
+        self.evidence_toggle.setText('Original evidence')
+        self.evidence_toggle.setCheckable(True)
+        self.evidence_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.evidence_toggle.toggled.connect(self._update_evidence_visibility)
+        evidence_layout.addWidget(self.evidence_toggle)
         self.provenance = QLabel()
         self.provenance.setTextFormat(Qt.TextFormat.PlainText)
         self.provenance.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.provenance.setWordWrap(True)
+        self.provenance.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         evidence_layout.addWidget(self.provenance)
         self.payload_title = QLabel('Deterministic payload')
         evidence_layout.addWidget(self.payload_title)
@@ -61,7 +74,7 @@ class FindingsPage(QWidget):
         self.splitter.addWidget(self.evidence_panel)
         self.splitter.setStretchFactor(0, 2)
         self.splitter.setStretchFactor(1, 1)
-        self._showing_evidence = False
+        self._selected_evidence = None
         self.table.itemSelectionChanged.connect(self._select)
         self.table.itemActivated.connect(lambda _: self._select())
         session.changed.connect(self.refresh)
@@ -81,12 +94,13 @@ class FindingsPage(QWidget):
                 evidence = session.context.evidence_for(identifier)
                 values = (finding.attention_level,
                           ', '.join(dict.fromkeys(e.dataset_name for e in evidence)),
-                          ', '.join(dict.fromkeys(e.operation for e in evidence)),
+                          ', '.join(dict.fromkeys(human_label(e.operation) for e in evidence)),
                           identifier if len(identifier) <= 24 else identifier[:21] + '...')
                 for column, value in enumerate(values):
                     item = QTableWidgetItem(value)
                     item.setData(Qt.ItemDataRole.UserRole, identifier)
-                    item.setToolTip(identifier if column == 3 else value)
+                    item.setToolTip(identifier if column == 3 else
+                                    ', '.join(dict.fromkeys(e.operation for e in evidence)) if column == 2 else value)
                     self.table.setItem(row, column, item)
                 if identifier == focused:
                     self.table.setCurrentCell(row, 0)
@@ -109,22 +123,38 @@ class FindingsPage(QWidget):
         self.table.setEnabled(active)
         selected = focused in ids
         self.neutral.setVisible(not selected)
-        for widget in (self.provenance, self.payload_title, self.details):
+        key = (session.context, focused) if selected else None
+        if key != self._selected_evidence:
+            with QSignalBlocker(self.evidence_toggle):
+                self.evidence_toggle.setChecked(False)
+        self._selected_evidence = key
+        for widget in (self.evidence_summary, self.evidence_toggle):
             widget.setVisible(selected)
+        self.evidence_summary.clear()
         self.provenance.clear()
         self.details.clear()
         if selected:
             finding = session.context.findings[focused]
             evidence = session.context.evidence_for(focused)[0]
+            self.evidence_summary.setText('\n'.join([
+                f'Attention: {finding.attention_level} | {evidence.dataset_name}',
+                f'{human_label(evidence.source_type)} | {human_label(evidence.operation)}']))
+            self.evidence_summary.setToolTip(focused + '\n' + evidence.evidence_id)
             self.provenance.setText('\n'.join([
                 f'Finding: {focused}', f'Attention: {finding.attention_level}',
                 f'Evidence ID: {evidence.evidence_id}', f'Dataset: {evidence.dataset_name}',
                 f'Source type: {evidence.source_type}', f'Operation: {evidence.operation}']))
             self.details.setPlainText(evidence.payload)
-        if selected != self._showing_evidence or not selected:
-            height = max(self.splitter.height(), 300)
-            self.splitter.setSizes([int(height * .65), int(height * .35)] if selected else [height, 50])
-        self._showing_evidence = selected
+        self._update_evidence_visibility()
+
+    def _update_evidence_visibility(self):
+        expanded = self._selected_evidence is not None and self.evidence_toggle.isChecked()
+        self.evidence_toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        for widget in (self.provenance, self.payload_title, self.details):
+            widget.setVisible(expanded)
+        height = max(self.splitter.height(), 300)
+        self.splitter.setSizes([int(height * .65), int(height * .35)] if expanded else
+                               [height, self.evidence_panel.minimumSizeHint().height()])
 
     def _select(self):
         items = self.table.selectedItems()

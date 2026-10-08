@@ -31,12 +31,19 @@ def test_empty_load_select_provenance(window):
     assert page.provenance.text() == '\n'.join([
         'Finding: f1', 'Attention: low', 'Evidence ID: e1',
         'Dataset: directory', 'Source type: analysis', 'Operation: unique_count'])
-    assert not page.details.isHidden()
+    assert page.details.isHidden() and not page.evidence_summary.isHidden()
+    assert page.evidence_summary.text() == 'Attention: low | directory\nAnalysis | Unique count'
+    assert not page.evidence_toggle.isChecked()
+    page.evidence_toggle.click()
+    assert not page.details.isHidden() and not page.provenance.isHidden()
+    assert page.details.toPlainText() == payload
     assert page.table.item(0, 1).text() == 'directory'
-    assert page.table.item(0, 2).text() == 'unique_count'
+    assert page.table.item(0, 2).text() == 'Unique count'
+    assert page.table.item(0, 2).toolTip() == 'unique_count'
     page.table.selectRow(1)
     page.table.itemActivated.emit(page.table.item(1, 0))
     assert window.investigation_session.state.focus.finding_id == 'f2'
+    assert page.details.isHidden() and not page.evidence_toggle.isChecked()
 
 
 def test_filters_hidden_focus_restore_and_lifecycle(window):
@@ -78,7 +85,9 @@ def test_search_focus_synchronizes_page_and_long_ids(window):
     assert page.table.selectedItems()
     assert len(page.table.item(0, 3).text()) <= 24
     assert page.table.item(0, 3).toolTip() == long_id
+    assert long_id in page.evidence_summary.toolTip()
     assert long_id in page.provenance.text()
     session.clear_focus()
     assert not page.table.selectedItems()
     assert not page.neutral.isHidden() and page.details.isHidden()
+    assert page.evidence_summary.isHidden() and page.evidence_toggle.isHidden()

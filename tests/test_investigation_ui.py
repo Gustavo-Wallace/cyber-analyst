@@ -44,7 +44,7 @@ def test_binding_all_focus_hidden_clear(window):
     assert 'Analyses: 1' in w.context_inspector.details.toPlainText()
     choose(w,'f2','finding')
     assert 'Attention: medium' in w.context_inspector.details.toPlainText()
-    assert 'Operation: unique_count' in w.context_inspector.details.toPlainText()
+    assert 'Operation: Unique count' in w.context_inspector.details.toPlainText()
     choose(w,'remote','analysis')
     assert s.state.focus.analysis.dataset_name=='remote_access'
     assert s.state.focus.analysis.analysis_id=='count'

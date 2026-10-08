@@ -3,6 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFileDialog
 from cyber_analyst.app.config import RuntimeConfig, discover_paths
+from .theme import label, role
 
 class SettingsPage(QWidget):
     def __init__(self, apply_config, parent=None):
@@ -12,10 +13,12 @@ class SettingsPage(QWidget):
         title = QLabel('Local AI')
         title.setObjectName('pageTitle')
         layout.addWidget(title)
+        layout.addWidget(label('Select the local AI runtime and model, then apply settings.', 'caption'))
         self.executable = QLineEdit()
         self.model = QLineEdit()
-        for label, field, pattern in [('llama-server', self.executable, 'llama-server (llama-server.exe)'), ('Model', self.model, 'GGUF model (*.gguf)')]:
-            layout.addWidget(QLabel(label))
+        for caption, field, pattern in [('AI runtime (llama-server)', self.executable, 'llama-server (llama-server.exe)'), ('Model (GGUF)', self.model, 'GGUF model (*.gguf)')]:
+            layout.addWidget(QLabel(caption))
+            field.textChanged.connect(field.setToolTip)
             row = QHBoxLayout()
             row.addWidget(field)
             button = QPushButton('Browse')
@@ -26,9 +29,9 @@ class SettingsPage(QWidget):
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
-        self.apply_button = QPushButton('Apply')
+        self.apply_button = role(QPushButton('Apply settings'), 'primary')
         self.apply_button.clicked.connect(self.apply)
-        layout.addWidget(self.apply_button)
+        layout.addWidget(self.apply_button, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addStretch()
         executable, model = discover_paths()
         self.executable.setText(str(executable) if executable else '')

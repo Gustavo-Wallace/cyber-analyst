@@ -255,3 +255,23 @@ def test_dataset_derived_action_labels_remain_plain_text(window):
     labels = widget.buttons[index].findChildren(QLabel)
     assert labels[0].text() == widget.steps[index].title
     assert all(label.textFormat() == Qt.TextFormat.PlainText for label in labels)
+
+
+def test_readable_recommendation_operations_preserve_source_and_navigation(window):
+    from PySide6.QtWidgets import QLabel
+    from cyber_analyst.ui.presentation_labels import human_label, finding_supporting_label
+    assert human_label('column_distribution') == 'Column distribution'
+    assert human_label('group_count') == 'Group count'
+    assert finding_supporting_label('High attention | column_distribution, group_count | raw_column') == (
+        'High attention | Column distribution, Group count | raw_column')
+    window.set_investigation(synthetic())
+    widget = window.overview_page.next_steps
+    index = next(i for i, step in enumerate(widget.steps) if step.target_id == 'f1')
+    step = widget.steps[index]
+    button = widget.buttons[index]
+    assert 'Unique count' in button.findChildren(QLabel)[1].text()
+    assert 'unique_count' in step.supporting_label and 'unique_count' in button.toolTip()
+    before = window.investigation_session.result
+    button.click()
+    assert window.investigation_session.state.focus.finding_id == 'f1'
+    assert window.investigation_session.result is before

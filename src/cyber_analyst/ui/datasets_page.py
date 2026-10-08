@@ -24,7 +24,8 @@ MAX_PREVIEW_ROWS = 100
 def value_item(value):
     text = '' if value is None else str(value)
     item = QTableWidgetItem(text)
-    item.setToolTip('<qt>' + escape(text).replace('\n', '<br>') + '</qt>' if value is not None else '(null)')
+    item.setToolTip('(null)' if value is None else '(empty string)' if value == '' else
+                    '<qt>' + escape(text).replace('\n', '<br>') + '</qt>')
     item.setData(Qt.ItemDataRole.UserRole, value)
     return item
 

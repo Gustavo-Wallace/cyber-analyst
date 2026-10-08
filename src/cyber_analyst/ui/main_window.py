@@ -208,7 +208,17 @@ class MainWindow(QMainWindow):
 
     def _workspace_page_changed(self, index):
         self.workspace.header.set_page(self.navigation.button(index).text())
-        self.workspace.set_exploration_visible(self.pages.currentWidget() is not self.datasets_page)
+        self.workspace.set_exploration_visible(self.pages.currentWidget() not in (self.datasets_page, self.settings_page))
+        self.workspace.set_search_visible(self.pages.currentWidget() is not self.analyst_page)
+        self._refresh_primary_presentation()
+
+    def _refresh_primary_presentation(self):
+        # Empty-page actions already provide the same entry point.
+        page = self.pages.currentWidget()
+        duplicate = (page is self.overview_page and self.investigation_session.context is None
+                     or page is self.datasets_page and not len(self.collection))
+        self.workspace.run_button.setVisible(not duplicate and page is not self.settings_page)
+        self.workspace.header._reflow()
 
     def _show_page(self, index):
         # Specialist routes keep Dashboard selected without becoming sidebar entries.
@@ -281,7 +291,7 @@ class MainWindow(QMainWindow):
             self.workspace.run_button.setEnabled(not busy and not self.datasets_page.is_loading and not self._close_pending)
             self.workspace.run_button.setToolTip('Choose datasets in Data')
         self.dashboard_page.set_primary_action(self.workspace.run_button.text(), self.workspace.run_button.isEnabled(), self.workspace.run_button.toolTip())
-        self.workspace.header._reflow()
+        self._refresh_primary_presentation()
         self.datasets_page.setEnabled(not runner.running)
         if runner.running:
             self.workspace.run_status.setText('Running investigation...')
@@ -328,7 +338,7 @@ class MainWindow(QMainWindow):
         self.workspace.search_results.clear()
         self.workspace.search_results.hide()
         self.workspace.search.setEnabled(session.context is not None)
-        self.workspace.search.setPlaceholderText('Search data' if session.context else 'Load an investigation to search')
+        self.workspace.search.setPlaceholderText('Search investigation' if session.context else 'Load an investigation to search')
         if session.context is None:
             self.workspace.search.clear()
         self.context_inspector.render(session.context,session.state)
@@ -348,7 +358,7 @@ class MainWindow(QMainWindow):
             item=QListWidgetItem(f'{match.kind} | {match.label}'+(f' | {match.dataset_name}' if match.dataset_name else ''))
             item.setData(Qt.ItemDataRole.UserRole,match)
             results.addItem(item)
-        results.setVisible(bool(len(matches)))
+        results.setVisible(bool(len(matches)) and not self.workspace.search.isHidden())
         if len(matches): results.setCurrentRow(0)
 
     def _activate_search(self):
