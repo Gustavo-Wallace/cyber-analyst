@@ -175,6 +175,7 @@ def test_cancel_after_accepted_completion_cannot_change_answer(setup):
 
 def test_late_signal_and_old_identity_cannot_update_new_exchange(setup):
     from cyber_analyst.app.analyst import AnalystRunResult
+    from cyber_analyst.ui.analyst_runner import _AnalystCompletion
     app, p, w, page = setup
     send(w, page); old = page.exchanges[-1].snapshot
     w.analyst_runner.cancel()
@@ -182,7 +183,7 @@ def test_late_signal_and_old_identity_cannot_update_new_exchange(setup):
     send(w, page); current = page.exchanges[-1]
     assert current.snapshot.cancellation.request_id != old.cancellation.request_id
     w.analyst_runner._complete(old.cancellation)
-    w.analyst_runner._worker_done.emit(old.cancellation)
+    w.analyst_runner._receive_completion(_AnalystCompletion(old, AnalystRunResult(p.response), None))
     w.analyst_runner.succeeded.emit(old, AnalystRunResult(p.response))
     w.analyst_runner.failed.emit(old, AIProviderError('late'))
     w.analyst_runner.cancelled.emit(old, AnalystCancelled(old.cancellation.request_id))
@@ -230,6 +231,7 @@ def test_direct_window_destruction_is_safe(setup):
     w.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     assert token.requested
+    wait(app, lambda: not runner.running)
     assert runner.thread is None and runner.worker is None
 
 
@@ -243,15 +245,13 @@ def test_quit_event_is_deferred_until_worker_unwinds(setup):
     wait(app, lambda: not w.analyst_runner.running)
 
 
-def test_shutdown_wait_is_bounded_without_unsafe_thread_termination(setup, monkeypatch):
-    import cyber_analyst.ui.analyst_runner as module
+def test_shutdown_is_nonblocking_without_unsafe_thread_termination(setup, monkeypatch):
     app, p, w, page = setup
     entered, release = Event(), Event()
     def uncooperative(*args, **kwargs):
         entered.set(); assert release.wait(3)
         return p.response
     monkeypatch.setattr(p, 'answer', uncooperative)
-    monkeypatch.setattr(module, 'SHUTDOWN_WAIT_MS', 20)
     send(w, page); wait(app, entered.is_set)
     start = time.monotonic()
     assert not w.analyst_runner.shutdown()
@@ -259,3 +259,96 @@ def test_shutdown_wait_is_bounded_without_unsafe_thread_termination(setup, monke
     assert w.analyst_runner.running
     release.set(); wait(app, lambda: not w.analyst_runner.running)
     assert page.exchanges[0].outcome_status == 'cancelled'
+
+
+@pytest.mark.parametrize('cancel', [False, True])
+def test_queued_completion_never_reads_destroyed_worker(setup, cancel):
+    from PySide6.QtCore import QThread
+    from shiboken6 import isValid
+    app, p, w, page = setup
+    delivered = []
+    w.analyst_runner.succeeded.connect(
+        lambda snapshot, result: delivered.append((snapshot, result, QThread.currentThread())))
+    p.release.set(); send(w, page)
+    runner = w.analyst_runner
+    thread, worker = runner.thread, runner.worker
+    snapshot = page.exchanges[-1].snapshot
+    # Do not deliver queued GUI callbacks until native worker destruction is done.
+    assert thread.wait(2000)
+    assert not isValid(worker)
+    del worker.snapshot  # Queued callbacks must use their Python payload, never this wrapper.
+    assert runner.cancellation is snapshot.cancellation
+    if cancel:
+        assert runner.cancel()
+    wait(app, lambda: not runner.running)
+    assert page.exchanges[-1].outcome_status == ('cancelled' if cancel else 'answered')
+    if cancel:
+        assert delivered == []
+    else:
+        assert len(delivered) == 1
+        assert delivered[0][0] is snapshot and delivered[0][1].response is p.response
+        assert delivered[0][2] is app.thread()
+    assert runner.worker is None and runner.thread is None
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not isValid(thread)
+
+
+def test_duplicate_completion_and_finished_callbacks_deliver_once(setup):
+    from cyber_analyst.ui.analyst_runner import _AnalystCompletion
+    from cyber_analyst.app.analyst import AnalystRunResult
+    app, p, w, page = setup
+    delivered = []
+    w.analyst_runner.succeeded.connect(lambda *args: delivered.append(args))
+    p.release.set(); send(w, page)
+    snapshot = page.exchanges[-1].snapshot
+    runner = w.analyst_runner
+    wait(app, lambda: not runner.running)
+    answer = page.exchanges[-1].answer.toPlainText()
+    completion = _AnalystCompletion(snapshot, AnalystRunResult(p.response), None)
+    runner._receive_completion(completion)
+    runner._thread_finished()
+    runner._complete(snapshot.cancellation)
+    app.processEvents()
+    assert len(delivered) == 1 and page.exchanges[-1].answer.toPlainText() == answer
+    assert runner._snapshot is None and runner._completion is None
+    assert not runner._thread_finished_received
+
+
+def test_native_cleanup_readiness_does_not_block_or_complete_early(setup, monkeypatch):
+    from PySide6.QtCore import QThread
+    app, p, w, page = setup
+    p.release.set(); send(w, page)
+    runner = w.analyst_runner
+    thread = runner.thread
+    assert thread.wait(2000)
+    original_wait = QThread.wait
+    checks = []
+    def ready(self, timeout):
+        assert timeout == 0, 'GUI cleanup must never wait for a running thread'
+        checks.append(timeout)
+        if len(checks) == 1:
+            assert runner.running and page.exchanges[-1].outcome_status == 'running'
+            assert runner.cancellation.completed_at is None
+            return False
+        return original_wait(self, timeout)
+    monkeypatch.setattr(QThread, 'wait', ready)
+    wait(app, lambda: not runner.running)
+    assert len(checks) >= 2 and page.exchanges[-1].outcome_status == 'answered'
+
+
+def test_exception_payload_preserved_after_native_worker_destruction(setup):
+    from shiboken6 import isValid
+    app, p, w, page = setup
+    cause = ConnectionResetError('closed')
+    error = AIProviderError('provider failure')
+    error.__cause__ = cause
+    p.error = error
+    delivered = []
+    w.analyst_runner.failed.connect(lambda snapshot, result: delivered.append(result))
+    p.release.set(); send(w, page)
+    thread, worker = w.analyst_runner.thread, w.analyst_runner.worker
+    assert thread.wait(2000) and not isValid(worker)
+    del worker.snapshot
+    wait(app, lambda: not w.analyst_runner.running)
+    assert delivered == [error] and delivered[0].__cause__ is cause
+    assert page.exchanges[-1].outcome_status == 'error'

@@ -303,11 +303,12 @@ def test_close_waits_safely_then_cleans_thread(setup):
     assert w.analyst_runner.thread is None and w.analyst_runner.worker is None
 
 
-def test_quit_shutdown_joins_worker(setup):
+def test_shutdown_requests_cancellation_and_cleans_worker_asynchronously(setup):
     app, p, w, page = setup
     p.release.set()
     send(w, page)
     w.analyst_runner.shutdown()
+    wait(app, lambda: not w.analyst_runner.running)
     assert w.analyst_runner.thread is None and w.analyst_runner.worker is None
 
 

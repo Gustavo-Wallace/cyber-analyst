@@ -9,8 +9,6 @@ from cyber_analyst.context.view import InvestigationView
 from cyber_analyst.app.analyst import AnalystRunResult
 from cyber_analyst.analyst.cancellation import CancellationToken, AnalystCancelled
 
-SHUTDOWN_WAIT_MS = 1500
-
 
 @dataclass(frozen=True)
 class AnalystSnapshot:
@@ -22,30 +20,40 @@ class AnalystSnapshot:
     cancellation: CancellationToken = field(default_factory=CancellationToken, compare=False)
 
 
+@dataclass(frozen=True)
+class _AnalystCompletion:
+    """Python-only outcome, independent of the worker's native lifetime."""
+    snapshot: AnalystSnapshot
+    result: AnalystRunResult | None
+    error: Exception | None
+
+
 class AnalystWorker(QObject):
+    completed = Signal(object)
     finished = Signal()
 
     def __init__(self, pipeline, snapshot):
         super().__init__()
         self.pipeline, self.snapshot = pipeline, snapshot
-        self.result = self.error = None
 
     @Slot()
     def run(self):
+        result = error = None
         try:
             s = self.snapshot
             s.cancellation.check()
             result = self.pipeline.answer(s.request, s.context, s.state, s.view, cancellation=s.cancellation)
             s.cancellation.check()
-            self.result = result if isinstance(result, AnalystRunResult) else AnalystRunResult(result)
+            result = result if isinstance(result, AnalystRunResult) else AnalystRunResult(result)
         except Exception as exc:
             if self.snapshot.cancellation.requested and not isinstance(exc, AnalystCancelled):
-                self.error = AnalystCancelled(self.snapshot.cancellation.request_id)
-                self.error.__cause__ = exc
+                error = AnalystCancelled(self.snapshot.cancellation.request_id)
+                error.__cause__ = exc
             else:
-                self.error = exc
+                error = exc
         finally:
             self.snapshot.cancellation.worker_completed_at = datetime.now(timezone.utc).isoformat()
+            self.completed.emit(_AnalystCompletion(self.snapshot, result, error))
             self.finished.emit()
 
 
@@ -54,18 +62,18 @@ class AnalystRunner(QObject):
     succeeded = Signal(object, object)
     failed = Signal(object, object)
     cancelled = Signal(object, object)
-    _worker_done = Signal(object)
 
     def __init__(self, pipeline=None, parent=None):
         super().__init__(parent)
         self.pipeline = pipeline
         self.thread = self.worker = None
+        self._snapshot = self._completion = None
+        self._thread_finished_received = False
         self._disposed = False
-        self._worker_done.connect(self._complete)
 
     @property
     def cancellation(self):
-        return self.worker.snapshot.cancellation if self.worker is not None else None
+        return self._snapshot.cancellation if self._snapshot is not None else None
 
     @property
     def running(self):
@@ -78,31 +86,52 @@ class AnalystRunner(QObject):
             raise ValueError('An Analyst request is already running')
         if self.pipeline is None or not callable(getattr(self.pipeline, 'answer', None)):
             raise ValueError('Configure the local AI runtime and model in Settings')
+        self._snapshot = snapshot
+        self._completion = None
+        self._thread_finished_received = False
         self.thread = QThread(self)
         self.worker = AnalystWorker(self.pipeline, snapshot)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
+        self.worker.completed.connect(self._receive_completion, Qt.ConnectionType.QueuedConnection)
         self.worker.finished.connect(self.thread.quit, Qt.ConnectionType.DirectConnection)
-        self.worker.finished.connect(self.worker.deleteLater)
-        identity = snapshot.cancellation
-        # The relay only emits a signal; all controller work runs in its Qt slot.
-        self.thread.finished.connect(lambda: self._worker_done.emit(identity))
+        # Qt processes this deferred deletion while finishing the worker thread.
+        self.thread.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self._thread_finished, Qt.ConnectionType.QueuedConnection)
         self.changed.emit()
         self.thread.start()
 
     @Slot(object)
+    def _receive_completion(self, completion):
+        if completion.snapshot is not self._snapshot or self._completion is not None:
+            return
+        self._completion = completion
+        self._complete(completion.snapshot.cancellation)
+
+    @Slot()
+    def _thread_finished(self):
+        if self.thread is None or self.sender() is not self.thread:
+            return
+        self._thread_finished_received = True
+        self._complete(self.cancellation)
+
+    @Slot(object)
     def _complete(self, identity):
-        if self.worker is None or self.cancellation is not identity:
+        if (self.thread is None or self.cancellation is not identity
+                or self._completion is None or not self._thread_finished_received):
             return
-        snapshot, result, error = self.worker.snapshot, self.worker.result, self.worker.error
-        if self.thread.isRunning():
-            # finished can be delivered while Qt is still releasing thread-local
-            # resources. Keep identity protection without blocking the GUI.
-            QTimer.singleShot(10, self, lambda: self._complete(identity))
+        # finished precedes native thread cleanup. A zero-time check never waits
+        # on the GUI; defer release until that cleanup has actually completed.
+        if not self.thread.wait(0):
+            QTimer.singleShot(0, self, lambda: self._complete(identity))
             return
+        completion = self._completion
+        snapshot, result, error = completion.snapshot, completion.result, completion.error
         was_cancelled = identity.finish()
         self.thread.deleteLater()
         self.thread = self.worker = None
+        self._snapshot = self._completion = None
+        self._thread_finished_received = False
         if self._disposed:
             self.deleteLater()
             return
@@ -124,14 +153,12 @@ class AnalystRunner(QObject):
 
     @Slot()
     def shutdown(self):
-        """Bounded fallback; normal window close waits asynchronously via changed."""
+        """Request cancellation; queued completion owns cleanup without GUI waits."""
         if self.thread is not None:
             token = self.cancellation
             self.cancel()
-            if not self.thread.wait(SHUTDOWN_WAIT_MS):
-                return False
             self._complete(token)
-        return True
+        return not self.running
 
     @Slot()
     def dispose(self):
