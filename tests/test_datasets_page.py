@@ -210,3 +210,48 @@ def test_background_thread_and_shutdown(page, tmp_path, monkeypatch):
     page.close()
     assert not thread.isRunning()
     QApplication.processEvents()
+
+
+@pytest.mark.parametrize('content,error_text', [
+    (None, 'inexistente'),
+    (b'', 'vazio'),
+    (b'id,host\n1,"unterminated\n', 'estrutura e encoding'),
+    (b'id,host\n1,alpha,extra\n', 'estrutura e encoding'),
+    (b'id,host\n1,\xff\n', 'estrutura e encoding'),
+])
+def test_load_failure_then_valid_recovery_preserves_previous_dataset(page, tmp_path, monkeypatch, content, error_text):
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from shiboken6 import isValid
+    valid = tmp_path / 'valid.csv'
+    valid.write_bytes(b'username\nana\n')
+    page.load_path(valid)
+    wait_for_load(page)
+    previous = page.dataset
+    preview = page.preview_table.item(0, 0).text()
+    bad = tmp_path / 'bad.csv'
+    bad.write_bytes(content if content is not None else b'username\nremoved\n')
+    if content is None:
+        bad.unlink()  # File selected earlier, now deleted.
+    messages = []
+    monkeypatch.setattr(QMessageBox, 'exec', lambda self: messages.append((self.text(), self.textFormat())))
+    page.load_path(bad)
+    thread, worker = page._thread, page._worker
+    wait_for_load(page)
+    assert page.dataset is previous and len(page.collection) == 1
+    assert page.preview_table.item(0, 0).text() == preview
+    assert len(messages) == 1 and error_text in messages[0][0]
+    assert messages[0][1] == Qt.TextFormat.PlainText
+    assert page.add_button.isEnabled() and page.remove_button.isEnabled()
+    assert page._thread is None and page._worker is None
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not isValid(thread) and not isValid(worker)
+    recovery = tmp_path / 'recovery.csv'
+    recovery.write_bytes(b'username\nbruno\n')
+    page.load_path(recovery)
+    wait_for_load(page)
+    page.dataset_list.setCurrentRow(1)
+    assert page.dataset.name == 'recovery.csv'
+    assert page.preview_table.item(0, 0).text() == 'bruno'
+    assert valid.read_bytes() == b'username\nana\n'
+    if content is not None:
+        assert bad.read_bytes() == content

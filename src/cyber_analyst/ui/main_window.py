@@ -166,6 +166,7 @@ class MainWindow(QMainWindow):
         self.dashboard_page.manual_requested.connect(lambda: self._show_page(1))
         self._close_pending = False
         self._quit_pending = False
+        self._investigation_generation = None
         QApplication.instance().installEventFilter(self)
         self.investigation_runner = InvestigationRunner(investigation_pipeline, self)
         self.investigation_runner.changed.connect(self._update_run_controls)
@@ -301,14 +302,17 @@ class MainWindow(QMainWindow):
             self.close()
 
     def _run_investigation(self):
-        if self.datasets_page.is_loading or self.analyst_runner.running or self._close_pending:
+        if self.datasets_page.is_loading or self.investigation_runner.running or self.analyst_runner.running or self._close_pending:
             return
+        self._investigation_generation = self.investigation_session.generation
         try:
             self.investigation_runner.start(self.collection.values())
         except ValueError as exc:
             self.statusBar().showMessage(str(exc))
 
     def _investigation_completed(self, result):
+        if self._discard_stale_investigation():
+            return
         first_result = self.investigation_session.context is None
         try:
             self.set_investigation(result)
@@ -321,9 +325,18 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('Investigation completed')
 
     def _investigation_failed(self, error):
+        if self._discard_stale_investigation():
+            return
         self.workspace.run_status.setText('Failed')
         stage = getattr(error, 'stage', 'result')
         self.statusBar().showMessage(f'Investigation failed [{stage}]: {error}')
+
+    def _discard_stale_investigation(self):
+        if self._investigation_generation != self.investigation_session.generation:
+            self.workspace.run_status.setText('Investigation changed')
+            self.statusBar().showMessage('Previous investigation run discarded; the session changed')
+            return True
+        return False
 
     def _investigation_changed(self):
         session=self.investigation_session

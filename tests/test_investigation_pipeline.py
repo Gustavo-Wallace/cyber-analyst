@@ -190,6 +190,36 @@ def test_real_deterministic_integration(datasets,count):
     assert originals==[d.path.read_bytes() for d in datasets]
 
 
+def test_loaded_source_disappears_profile_failure_then_restored_source_recovers(datasets):
+    pipeline = synthetic_pipeline()
+    contents = [d.path.read_bytes() for d in datasets]
+    datasets[0].path.unlink()
+    with pytest.raises(InvestigationPipelineError) as caught:
+        pipeline.run(datasets)
+    assert caught.value.stage == 'profiling' and caught.value.dataset is datasets[0]
+    assert caught.value.__cause__ is caught.value.original_exception
+    pipeline.semantic_service.understand_dataset.assert_not_called()
+    pipeline.analysis_planner.plan.assert_not_called()
+    assert datasets[1].path.read_bytes() == contents[1]
+    datasets[0].path.write_bytes(contents[0])
+    result = pipeline.run(datasets)
+    assert [r.analysis_execution.results[0].rows for r in result.datasets] == [(('user', 2),), (('user', 2),)]
+    assert result.correlation_execution.results[0].correlation_result.summary.matched_rows == 2
+    assert [d.path.read_bytes() for d in datasets] == contents
+
+
+def test_header_only_source_completes_with_zero_rows_without_fabricating_results(tmp_path):
+    path = tmp_path / 'empty.csv'
+    content = b'user\n'
+    path.write_bytes(content)
+    result = synthetic_pipeline().run((load_csv(path),))
+    assert result.datasets[0].profile.row_count == 0
+    assert result.datasets[0].analysis_execution.results[0].rows == (('user', 0),)
+    assert not result.entities.entities and not result.relations.relations
+    assert not result.correlation_execution.results
+    assert path.read_bytes() == content
+
+
 def entity_smoke(tmp_path):
     from test_entities import smoke_sources
     from dataclasses import replace

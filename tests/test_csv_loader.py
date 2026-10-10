@@ -81,3 +81,52 @@ def test_invalid_csv(tmp_path, content):
     with pytest.raises(DatasetLoadError, match="estrutura e encoding"):
         load_csv(path)
     assert path.read_bytes() == content
+
+
+def test_unclosed_quote_rejected_without_changing_file(tmp_path):
+    path = tmp_path / 'malformed.csv'
+    content = b'id,host\n1,"unterminated\n'
+    path.write_bytes(content)
+    with pytest.raises(DatasetLoadError, match='estrutura e encoding') as caught:
+        load_csv(path)
+    assert isinstance(caught.value.__cause__, pl.exceptions.PolarsError)
+    assert path.read_bytes() == content
+
+
+@pytest.mark.parametrize('content,columns,rows', [
+    (b'id,host\n1\n', ['id', 'host'], [(1, None)]),
+    (b'host,host\nalpha,beta\n', ['host', 'host_duplicated_0'], [('alpha', 'beta')]),
+])
+def test_existing_polars_short_row_and_duplicate_header_semantics(tmp_path, content, columns, rows):
+    path = tmp_path / 'accepted.csv'
+    path.write_bytes(content)
+    dataset = load_csv(path)
+    assert dataset.columns == columns and dataset.preview.rows() == rows
+    assert dataset.lazy_frame.collect().rows() == rows
+    assert path.read_bytes() == content
+
+
+def test_windows_unreadable_file_recovers_after_exclusive_lock_released(tmp_path):
+    import os
+    if os.name != 'nt':
+        pytest.skip('Windows exclusive file lock')
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    path = tmp_path / 'locked.csv'
+    content = b'id\n1\n'
+    path.write_bytes(content)
+    handle = kernel.CreateFileW(str(path), 0x80000000, 0, None, 3, 0x80, None)
+    assert handle != ctypes.c_void_p(-1).value, ctypes.get_last_error()
+    try:
+        with pytest.raises(DatasetLoadError, match='acesso') as caught:
+            load_csv(path)
+        assert caught.value.__cause__ is not None
+    finally:
+        assert kernel.CloseHandle(handle)
+    assert load_csv(path).row_count == 1 and path.read_bytes() == content

@@ -310,3 +310,25 @@ def test_replaced_dataset_at_same_path_refreshes_cached_view(page,tmp_path):
     assert page._search_result is None
     assert page.preview_table.horizontalHeaderItem(0).text()=='other'
     assert page.preview_table.item(0,0).text()=='replacement'
+
+
+def test_source_disappears_after_load_search_fails_and_recovers(page, tmp_path):
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from shiboken6 import isValid
+    path = tmp_path / 'disappearing.csv'
+    content = b'username\nana\n'
+    path.write_bytes(content)
+    page.load_path(path); wait_for_load(page)
+    dataset = page.dataset
+    path.unlink()
+    page.search_field.setText('ana'); page.search_button.click()
+    thread, worker = page.search_runner.thread, page.search_runner.worker
+    wait_for(lambda: not page._searching and page.search_runner.thread is None)
+    assert page._search_result is None and page.search_status.text().startswith('Search failed:')
+    assert 'disappearing.csv' in page.search_status.text()
+    assert page.dataset is dataset and page.preview_table.item(0, 0).text() == 'ana'
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not isValid(thread) and not isValid(worker)
+    path.write_bytes(content)
+    assert search(page, 'ana').hits
+    assert page.dataset is dataset and path.read_bytes() == content

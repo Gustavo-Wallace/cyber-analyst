@@ -110,9 +110,12 @@ def test_failed_replacement_preserves_previous(setup):
     assert w.workspace.run_button.isEnabled()
 
 
-def test_close_defers_until_worker_finishes(setup):
+@pytest.mark.parametrize('failure', [False, True])
+def test_close_defers_until_worker_finishes(setup, failure):
     app, pipeline, w = setup
     load(w, pipeline)
+    if failure:
+        pipeline.error = RuntimeError('controlled failure while closing')
     w.workspace.run_button.click()
     wait(app, lambda: bool(pipeline.calls))
     w.close()
@@ -120,6 +123,7 @@ def test_close_defers_until_worker_finishes(setup):
     pipeline.release.set()
     wait(app, lambda: not w.isVisible())
     assert w.investigation_runner.thread is None
+    assert w.investigation_runner.worker is None
 
 
 def test_no_pipeline_still_loads_datasets(setup):
@@ -159,3 +163,115 @@ def test_dashboard_action_reuses_data_and_runner(setup):
     pipeline.release.set()
     wait(app, lambda: not w.investigation_runner.running)
     assert w.investigation_session.result is pipeline.result
+
+
+@pytest.mark.parametrize('replacement', ['load', 'clear'])
+@pytest.mark.parametrize('failure', [False, True])
+def test_inflight_result_cannot_overwrite_newer_session(setup, replacement, failure):
+    app, pipeline, w = setup
+    load(w, pipeline)
+    w.set_investigation(synthetic())
+    w.workspace.run_button.click()
+    wait(app, lambda: bool(pipeline.calls))
+    session = w.investigation_session
+    if replacement == 'load':
+        w.set_investigation(synthetic())
+        session.set_dataset_scope(('directory',))
+        session.navigate(next(iter(session.search('ana'))))
+    else:
+        session.clear()
+    before = (session.result, session.context, session.state, session.view)
+    if failure:
+        pipeline.error = RuntimeError('obsolete failure')
+    pipeline.release.set()
+    wait(app, lambda: not w.investigation_runner.running)
+    assert all(a is b for a, b in zip(before, (session.result, session.context, session.state, session.view)))
+    assert w.workspace.run_status.text() != 'Completed'
+    assert w.workspace.run_button.isEnabled()
+
+
+def test_clear_during_first_run_discards_late_result(setup):
+    app, pipeline, w = setup
+    load(w, pipeline)
+    w.workspace.run_button.click()
+    wait(app, lambda: bool(pipeline.calls))
+    w.investigation_session.clear()
+    pipeline.release.set()
+    wait(app, lambda: not w.investigation_runner.running)
+    assert w.investigation_session.result is None
+    assert not w.workspace.search.isEnabled()
+    assert w.workspace.run_status.text() == 'Investigation changed'
+
+
+@pytest.mark.parametrize('previous', [False, True])
+def test_failure_then_successful_retry_preserves_state_until_completion(setup, previous):
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from shiboken6 import isValid
+    app, pipeline, w = setup
+    load(w, pipeline)
+    session = w.investigation_session
+    if previous:
+        session.load(synthetic())
+        session.set_dataset_scope(('directory',))
+        session.set_entity_types(('username',))
+        session.set_attention_levels(('high',))
+        session.navigate(next(iter(session.search('ana'))))
+    before = (session.result, session.context, session.state, session.view)
+    pipeline.error = InvestigationPipelineError('analysis_execution', None, ValueError('controlled'))
+    w.workspace.run_button.click()
+    old_thread, old_worker = w.investigation_runner.thread, w.investigation_runner.worker
+    pipeline.release.set()
+    wait(app, lambda: not w.investigation_runner.running)
+    assert all(a is b for a, b in zip(before, (session.result, session.context, session.state, session.view)))
+    assert w.workspace.run_status.text() == 'Failed'
+    assert w.workspace.search.isEnabled() == previous
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not isValid(old_thread) and not isValid(old_worker)
+    if previous:
+        assert all(r.kind != 'finding' for r in session.search('low'))
+    pipeline.error = None
+    pipeline.release.clear()
+    w.workspace.run_button.click()
+    assert all(a is b for a, b in zip(before, (session.result, session.context, session.state, session.view)))
+    pipeline.release.set()
+    wait(app, lambda: not w.investigation_runner.running)
+    assert w.workspace.run_status.text() == 'Completed'
+    assert session.result is pipeline.result and len(pipeline.calls) == 2
+
+
+def test_filter_changes_during_run_do_not_invalidate_result(setup):
+    app, pipeline, w = setup
+    load(w, pipeline)
+    session = w.investigation_session
+    session.load(synthetic())
+    generation = session.generation
+    w.workspace.run_button.click()
+    session.set_dataset_scope(('directory',))
+    session.navigate(next(iter(session.search('ana'))))
+    assert session.generation == generation
+    pipeline.release.set()
+    wait(app, lambda: not w.investigation_runner.running)
+    assert session.result is pipeline.result
+    assert w.workspace.run_status.text() == 'Completed'
+
+
+def test_invalid_completed_result_never_replaces_valid_session(setup):
+    from dataclasses import replace
+    from cyber_analyst.entities import EntityResult
+    app, pipeline, w = setup
+    load(w, pipeline)
+    w.set_investigation(synthetic())
+    session = w.investigation_session
+    session.set_dataset_scope(('directory',))
+    before = (session.result, session.context, session.state, session.view, session.generation)
+    valid = pipeline.result
+    pipeline.result = replace(valid, entities=EntityResult(valid.entities.entities * 2))
+    w.workspace.run_button.click()
+    pipeline.release.set()
+    wait(app, lambda: not w.investigation_runner.running)
+    assert (session.result, session.context, session.state, session.view, session.generation) == before
+    assert w.workspace.run_status.text() == 'Failed'
+    pipeline.result = valid
+    w.workspace.run_button.click()
+    wait(app, lambda: not w.investigation_runner.running)
+    assert session.result is valid and w.workspace.run_status.text() == 'Completed'

@@ -51,6 +51,9 @@ def test_factory_and_lifecycle(config,monkeypatch):
     monkeypatch.setattr(p.pipeline,'run',fail)
     with pytest.raises(ValueError):p.run(())
     assert calls==['start','stop','start','stop']
+    monkeypatch.setattr(p.pipeline,'run',lambda datasets:result)
+    assert p.run(()) is result
+    assert calls==['start','stop','start','stop','start','stop']
 
 def test_settings_apply_transactional(config):
     app=QApplication.instance() or QApplication([])

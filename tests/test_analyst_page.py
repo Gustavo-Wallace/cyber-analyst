@@ -238,6 +238,12 @@ def test_failure_preserves_transcript_and_restores_controls(setup, error):
     send(w, page)
     wait(app, lambda: not w.analyst_runner.running)
     first = page.exchanges[0].answer.toPlainText()
+    session = w.investigation_session
+    session.set_dataset_scope(('directory',))
+    session.set_entity_types(('username',))
+    session.set_attention_levels(('high',))
+    session.navigate(next(iter(session.search('ana'))))
+    before = (session.result, session.context, session.state, session.view)
     p.error = error
     send(w, page, 'Second independent question')
     wait(app, lambda: not w.analyst_runner.running)
@@ -251,6 +257,21 @@ def test_failure_preserves_transcript_and_restores_controls(setup, error):
     assert set(p.calls[1][0].__dataclass_fields__) == {'question', 'response_language', 'scope'}
     page.question.setPlainText('Try again')
     assert page.send_button.isEnabled()
+    assert all(a is b for a, b in zip(before, (session.result, session.context, session.state, session.view)))
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from shiboken6 import isValid
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not isValid(p.calls[1][-1])
+    p.error = None
+    page.send_button.click()
+    thread, worker = w.analyst_runner.thread, w.analyst_runner.worker
+    wait(app, lambda: not w.analyst_runner.running)
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not isValid(thread) and not isValid(worker)
+    assert page.exchanges[2].outcome_status == 'answered' and page.status.text() == 'Ready'
+    assert page.exchanges[0].answer.toPlainText() == first
+    assert all(a is b for a, b in zip(before, (session.result, session.context, session.state, session.view)))
+    assert not session.view.finding_ids
 
 
 def test_snapshot_filters_focus_and_replacement(setup):

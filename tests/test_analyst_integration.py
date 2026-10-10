@@ -126,6 +126,10 @@ def test_runtime_start_failure_still_cleans_up(integration, monkeypatch):
         pipeline.answer(AnalystRequest('What is recorded?'), context, state, view)
     assert caught.value.original is original and lifecycle == ['start', 'stop']
     assert dict(caught.value.diagnostics)['Provider calls'] == 0
+    monkeypatch.setattr(pipeline.runtime, 'start', lambda **kwargs: lifecycle.append('start'))
+    result = pipeline.answer(AnalystRequest('Retry after runtime recovery'), context, state, view)
+    assert result.response.status == 'answered'
+    assert lifecycle == ['start', 'stop', 'start', 'stop']
 
 
 def test_adapter_cancel_interrupts_exclusive_runtime_and_wraps_socket_as_cancelled(integration, monkeypatch):
@@ -167,3 +171,50 @@ def test_pre_cancelled_adapter_request_does_not_start_runtime(integration):
     with pytest.raises(AnalystCancelled):
         pipeline.answer(AnalystRequest('What facts are recorded?'), context, state, view, cancellation=token)
     assert lifecycle == []
+
+
+@pytest.mark.parametrize('missing', ['runtime', 'model'])
+def test_missing_configured_file_cleanup_and_new_request_after_restore(integration, missing):
+    pipeline, lifecycle, context, state, view = integration
+    path = pipeline.config.llama_executable if missing == 'runtime' else pipeline.config.model_path
+    original = path.read_bytes()
+    path.unlink()
+    provider = Provider()
+    pipeline.ai_service.provider = provider
+    with pytest.raises(AnalystRunError) as caught:
+        pipeline.answer(AnalystRequest('What is recorded?'), context, state, view)
+    assert isinstance(caught.value.original, ValueError)
+    assert 'existing' in str(caught.value.original)
+    assert lifecycle == ['stop'] and not provider.calls
+    path.write_bytes(original)
+    result = pipeline.answer(AnalystRequest('Retry after restore'), context, state, view)
+    assert result.response.status == 'answered'
+    assert lifecycle == ['stop', 'start', 'stop']
+
+
+@pytest.mark.parametrize('failure', ['timeout', 'malformed'])
+def test_provider_failure_releases_runtime_and_lease_for_new_request(integration, failure):
+    from cyber_analyst.ai.models import AIStructuredOutputError
+    pipeline, lifecycle, context, state, view = integration
+    original = AIProviderError('provider timed out')
+    original.__cause__ = TimeoutError('socket timeout')
+    class Malformed(Provider):
+        def generate_structured(self, *args):
+            super().generate_structured(*args)
+            return '{invalid'
+    provider = Provider(error=original) if failure == 'timeout' else Malformed()
+    pipeline.ai_service.provider = provider
+    with pytest.raises(AnalystRunError) as caught:
+        pipeline.answer(AnalystRequest('What is recorded?'), context, state, view)
+    assert lifecycle == ['start', 'stop']
+    if failure == 'timeout':
+        assert caught.value.original is original
+        assert isinstance(caught.value.__cause__.__cause__, TimeoutError)
+        assert len(provider.calls) == 1
+    else:
+        assert isinstance(caught.value.original, AIStructuredOutputError)
+        assert len(provider.calls) == pipeline.ai_service.retries + 1
+    pipeline.ai_service.provider = Provider()
+    result = pipeline.answer(AnalystRequest('Fresh request'), context, state, view)
+    assert result.response.status == 'answered'
+    assert lifecycle == ['start', 'stop', 'start', 'stop']

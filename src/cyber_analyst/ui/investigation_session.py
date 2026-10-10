@@ -11,16 +11,24 @@ class InvestigationSession(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.result = self.context = self.state = self.view = None
+        self._generation = 0
+
+    @property
+    def generation(self):
+        """Result lifecycle identity; filter/focus updates do not replace it."""
+        return self._generation
 
     def load(self, result):
         context = ContextService().build(result)
         state = StateService().initial(context)
         view = ViewService().build(context,state)
         self.result,self.context,self.state,self.view = result,context,state,view
+        self._generation += 1
         self.changed.emit()
 
     def clear(self):
         self.result = self.context = self.state = self.view = None
+        self._generation += 1
         self.changed.emit()
 
     def set_state(self, state):
