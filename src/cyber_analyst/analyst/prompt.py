@@ -7,8 +7,12 @@ SYNTHESIS = """Return only a structural answer plan in the specified schema. Cho
 
 
 def messages(request, evidence, *, synthesis=False):
+    instruction = INSTRUCTIONS + '\n' + (SYNTHESIS if synthesis else SELECTION)
+    if synthesis and len(evidence['evidence']) == 1:
+        instruction += (' Only one evidence alias is authorized. Return exactly one section '
+                        'containing that alias exactly once, with no other sections or alias references.')
     return [
-        {'role': 'system', 'content': INSTRUCTIONS + '\n' + (SYNTHESIS if synthesis else SELECTION)},
+        {'role': 'system', 'content': instruction},
         {'role': 'user', 'content': encode({'question': request.question, 'response_language': request.response_language, 'scope': request.scope})},
         {'role': 'user', 'content': encode({'untrusted_evidence': evidence})},
     ]

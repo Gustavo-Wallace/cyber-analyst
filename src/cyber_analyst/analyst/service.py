@@ -32,13 +32,19 @@ def selection_schema(aliases):
 
 
 def response_schema(aliases):
+    aliases = tuple(aliases)
+    single_alias = len(aliases) == 1
+    section = _aliases(aliases, 1)
+    if single_alias:
+        # Non-empty sections and globally unique references permit only [[alias]].
+        section['maxItems'] = 1
     return {'type': 'object', 'additionalProperties': False,
             'required': ['status', 'answer_kind', 'sections', 'limitations'],
             'properties': {
                 'status': {'const': 'answered'},
                 'answer_kind': {'enum': ['factual_summary', 'focused_object', 'correlation_summary', 'investigation_overview']},
-                'sections': {'type': 'array', 'minItems': 1, 'maxItems': 4,
-                             'items': _aliases(aliases, 1)},
+                'sections': {'type': 'array', 'minItems': 1, 'maxItems': 1 if single_alias else 4,
+                             'items': section},
                 'limitations': {'type': 'object', 'additionalProperties': False,
                                 'required': list(LIMITATIONS),
                                 'properties': {code: {'type': 'boolean'} for code in LIMITATIONS}}}}

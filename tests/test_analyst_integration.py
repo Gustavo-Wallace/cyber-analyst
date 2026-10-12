@@ -12,10 +12,11 @@ from test_investigation_context import synthetic
 
 
 class Provider:
-    def __init__(self, *, invalid_json=False, redundant_plan=False, error=None):
+    def __init__(self, *, invalid_json=False, redundant_plan=False, multi_alias=False, error=None):
         self.calls = []
         self.invalid_json = invalid_json
         self.redundant_plan = redundant_plan
+        self.multi_alias = multi_alias
         self.error = error
 
     def generate_structured(self, messages, name, schema, config):
@@ -25,7 +26,7 @@ class Provider:
         if self.invalid_json and len(self.calls) == 1:
             return 'invalid'
         if name == 'analyst_selection':
-            return json.dumps({'status': 'supported', 'fact_aliases': ['F01']})
+            return json.dumps({'status': 'supported', 'fact_aliases': ['F01', 'F02'] if self.multi_alias else ['F01']})
         sections = [['F01']]
         if self.redundant_plan and len(self.calls) == 2:
             sections *= 2
@@ -87,7 +88,8 @@ def test_independent_requests_never_include_previous_question_or_answer(integrat
 
 
 @pytest.mark.parametrize('options,structured,domain', [
-    ({'invalid_json': True}, 1, 0), ({'redundant_plan': True}, 0, 1),
+    ({'invalid_json': True}, 1, 0), ({'redundant_plan': True}, 1, 0),
+    ({'redundant_plan': True, 'multi_alias': True}, 0, 1),
 ])
 def test_public_diagnostics_distinguish_structured_and_domain_retries(integration, options, structured, domain):
     pipeline, lifecycle, context, state, view = integration
