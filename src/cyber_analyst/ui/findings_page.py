@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QHeaderView, QPlainTextEdit, QSplitter, QToolButton, QSizePolicy,
 )
 from cyber_analyst.context import SearchResult
+from .session_refresh import SessionRefresh
 from .presentation_labels import human_label
 
 
@@ -77,8 +78,7 @@ class FindingsPage(QWidget):
         self._selected_evidence = None
         self.table.itemSelectionChanged.connect(self._select)
         self.table.itemActivated.connect(lambda _: self._select())
-        session.changed.connect(self.refresh)
-        self.refresh()
+        self._session_refresh = SessionRefresh(self, session, self.refresh, 'finding_id')
 
     def refresh(self):
         session = self.session

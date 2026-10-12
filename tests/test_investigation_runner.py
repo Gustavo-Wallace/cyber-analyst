@@ -85,7 +85,12 @@ def test_success_snapshot_thread_and_controls(setup):
     assert w.pages.currentWidget() is w.overview_page
     assert w.workspace.run_button.text() == 'Analyze again'
     assert w.workspace.search.isEnabled() and w.workspace.filters.datasets.isEnabled()
-    assert w.findings_page.table.rowCount() == 2 and w.relations_page.table.rowCount() == 2
+    assert w.findings_page._session_refresh.pending and w.relations_page._session_refresh.pending
+    w._open_dashboard_detail('findings')
+    assert w.findings_page.table.rowCount() == 2
+    w._open_dashboard_detail('relations')
+    assert w.relations_page.table.rowCount() == 2
+    w._show_page(0)
     assert w.workspace.run_status.text() == 'Completed'
     assert w.investigation_runner.worker is None and w.investigation_runner.thread is None
     assert w.datasets_page.isEnabled() and w.workspace.run_button.isEnabled()

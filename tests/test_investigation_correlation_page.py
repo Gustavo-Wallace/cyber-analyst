@@ -32,8 +32,8 @@ def test_correlation_ui(window,monkeypatch):
  monkeypatch.setattr(duckdb,'connect',forbidden)
  p=window.correlation_explorer;s=window.investigation_session
  assert 'No active' in p.message.text()
- window.set_investigation(synthetic());assert p.selector.rowCount()==0
- window.set_investigation(correlated());assert p.selector.rowCount()==1
+ load(window, synthetic());assert p.selector.rowCount()==0
+ load(window, correlated());assert p.selector.rowCount()==1
  p.selector.selectRow(0)
  assert s.state.focus.correlation_id=='candidate_one'
  assert 'Common keys: 1' in p.summary.text()
@@ -49,5 +49,11 @@ def test_correlation_ui(window,monkeypatch):
  assert s.state.focus.correlation_id=='candidate_one' and p.panel.isHidden()
  with pytest.raises(ValueError):s.focus_correlation('candidate_one')
  s.clear_filters();assert p.selector.rowCount()==1 and not p.panel.isHidden()
- window.set_investigation(synthetic());assert p.selector.rowCount()==0
+ load(window, synthetic());assert p.selector.rowCount()==0
  s.clear();assert 'No active' in p.message.text()
+
+
+def load(window, result):
+    # Deferred pages render on navigation, as in the workstation.
+    window.set_investigation(result)
+    window._open_dashboard_detail('correlations')

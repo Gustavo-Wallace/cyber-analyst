@@ -20,7 +20,7 @@ def test_empty_load_select_provenance(window):
     payload = '{"value":1.234567890123,"text":"<b>unaltered</b>","null":null}'
     evidence = replace(result.findings.evidence[0], payload=payload)
     result = replace(result, findings=replace(result.findings, evidence=(evidence, result.findings.evidence[1])))
-    window.set_investigation(result)
+    load(window, result)
     assert ids(page) == window.investigation_session.view.finding_ids == ('f1', 'f2')
     assert page.summary.text() == '2 visible findings   Medium 1   Low 1'
     assert not page.neutral.isHidden() and page.details.isHidden()
@@ -47,7 +47,7 @@ def test_empty_load_select_provenance(window):
 
 
 def test_filters_hidden_focus_restore_and_lifecycle(window):
-    window.set_investigation(synthetic())
+    load(window, synthetic())
     page = window.findings_page
     session = window.investigation_session
     page.table.selectRow(0)
@@ -66,7 +66,7 @@ def test_filters_hidden_focus_restore_and_lifecycle(window):
     assert ids(page) == ('f2',)
     session.set_attention_levels(['high'])
     assert ids(page) == () and page.empty.text().startswith('No findings match') and page.splitter.isHidden()
-    window.set_investigation(synthetic())
+    load(window, synthetic())
     assert ids(page) == ('f1', 'f2') and not page.table.selectedItems()
     assert not page.neutral.isHidden() and page.details.isHidden()
     session.clear()
@@ -78,7 +78,7 @@ def test_search_focus_synchronizes_page_and_long_ids(window):
     result = synthetic()
     long_id = 'finding_' + 'a' * 60
     finding = replace(result.findings.findings[0], finding_id=long_id)
-    window.set_investigation(replace(result, findings=replace(result.findings, findings=(finding,))))
+    load(window, replace(result, findings=replace(result.findings, findings=(finding,))))
     session = window.investigation_session
     session.navigate(next(iter(session.search(long_id))))
     page = window.findings_page
@@ -91,3 +91,9 @@ def test_search_focus_synchronizes_page_and_long_ids(window):
     assert not page.table.selectedItems()
     assert not page.neutral.isHidden() and page.details.isHidden()
     assert page.evidence_summary.isHidden() and page.evidence_toggle.isHidden()
+
+
+def load(window, result):
+    # Deferred pages render on navigation, as in the workstation.
+    window.set_investigation(result)
+    window._open_dashboard_detail('findings')

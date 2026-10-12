@@ -30,7 +30,7 @@ def test_relations_lifecycle_provenance_and_endpoints(window):
     assert window.pages.widget(4) is window.relations_tabs
     assert window.relations_tabs.widget(1) is page
     assert page.empty.text().startswith('No active investigation') and page.splitter.isHidden()
-    window.set_investigation(synthetic())
+    load(window, synthetic())
     session = window.investigation_session
     assert page.table.rowCount() == 2
     assert [page.table.item(i,0).data(Qt.ItemDataRole.UserRole) for i in range(2)] == list(session.view.relation_ids)
@@ -47,7 +47,7 @@ def test_relations_lifecycle_provenance_and_endpoints(window):
     page.table.selectRow(0)
     page.endpoint_b.click()
     assert session.state.focus.entity_id == 'email'
-    window.set_investigation(synthetic())
+    load(window, synthetic())
     assert not page.table.selectedItems()
     assert page.occurrences.isHidden()
     session.clear()
@@ -55,7 +55,7 @@ def test_relations_lifecycle_provenance_and_endpoints(window):
 
 
 def test_relation_filters_and_stale_navigation(window):
-    window.set_investigation(synthetic())
+    load(window, synthetic())
     session = window.investigation_session
     page = window.relations_page
     page.table.selectRow(0)
@@ -80,7 +80,7 @@ def test_relation_filters_and_stale_navigation(window):
 
 
 def test_visual_metadata_and_row_selection(window):
-    window.set_investigation(synthetic())
+    load(window, synthetic())
     page = window.relations_page
     assert page.endpoint_cards.isHidden()
     page.table.selectRow(0)
@@ -97,3 +97,9 @@ def test_visual_metadata_and_row_selection(window):
     assert page.table.item(0,0).toolTip() == 'ana\nr1'
     window.investigation_session.clear_focus()
     assert page.endpoint_cards.isHidden() and page.occurrences.isHidden()
+
+
+def load(window, result):
+    # Deferred pages render on navigation, as in the workstation.
+    window.set_investigation(result)
+    window._open_dashboard_detail('relations')

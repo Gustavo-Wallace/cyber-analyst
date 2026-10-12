@@ -116,13 +116,18 @@ def test_dashboard_and_analyst_refresh_the_same_diverse_selection(window):
     window.set_investigation(many_findings(correlated()))
     dashboard, analyst = window.overview_page.next_steps, window.analyst_page.next_steps
     assert [s.target_kind for s in dashboard.steps] == ['finding', 'finding', 'correlation', 'entity']
+    window._show_page(6)
     assert dashboard.steps == analyst.steps
+    window._show_page(0)
     session = window.investigation_session
     session.set_dataset_scope(('remote_access',))
     assert [s.target_kind for s in dashboard.steps] == ['finding', 'finding', 'entity', 'finding']
+    window._show_page(6)
     assert dashboard.steps == analyst.steps
+    window._show_page(0)
     session.clear_filters()
     assert [s.target_kind for s in dashboard.steps] == ['finding', 'finding', 'correlation', 'entity']
+    window._show_page(6)
     assert dashboard.steps == analyst.steps
 
 
@@ -180,6 +185,7 @@ def test_no_fake_recommendations_and_rendering_is_read_only(window):
     assert all(a is b for a, b in zip(before, (session.result, session.context, session.state, session.view)))
     assert page.next_steps.steps == window.analyst_page.next_steps.steps == build(result)
     session.clear()
+    window._show_page(6)
     assert not page.next_steps.steps and not window.analyst_page.next_steps.steps
 
 

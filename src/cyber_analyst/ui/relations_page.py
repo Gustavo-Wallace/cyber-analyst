@@ -3,6 +3,7 @@ from PySide6.QtCore import Qt, QSignalBlocker
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QSplitter)
 from cyber_analyst.context import SearchResult
+from .session_refresh import SessionRefresh
 from .theme import role
 
 
@@ -81,29 +82,34 @@ class RelationsPage(QWidget):
         self.table.itemSelectionChanged.connect(self._select)
         self.table.itemActivated.connect(lambda _: self._select())
         self._selected = False
-        session.changed.connect(self.refresh)
-        self.refresh()
+        self._table_key = None
+        self._session_refresh = SessionRefresh(self, session, self.refresh, 'relation_id')
 
     def refresh(self):
         session = self.session
         ids = session.view.relation_ids if session.view is not None else ()
         focused = session.state.focus.relation_id if session.state is not None else None
+        table_key = (session.generation, ids)
         with QSignalBlocker(self.table):
-            self.table.setRowCount(0)
-            self.table.setRowCount(len(ids))
-            for row, identifier in enumerate(ids):
-                relation = session.context.relations[identifier]
-                a, b = (session.context.entities[i] for i in (relation.entity_a_id, relation.entity_b_id))
-                values = (a.canonical_value, a.entity_type, 'Co-occurrence' if relation.relation_type == 'co_occurrence' else relation.relation_type,
-                          b.canonical_value, b.entity_type, str(len(relation.occurrences)))
-                for col, value in enumerate(values):
-                    item = QTableWidgetItem(value)
-                    item.setData(Qt.ItemDataRole.UserRole, identifier)
-                    item.setToolTip(f'{value}\n{identifier}')
-                    self.table.setItem(row, col, item)
-                if identifier == focused:
-                    self.table.setCurrentCell(row, 0)
-                    self.table.selectRow(row)
+            if table_key != self._table_key:
+                self.table.setRowCount(0)
+                self.table.setRowCount(len(ids))
+                for row, identifier in enumerate(ids):
+                    relation = session.context.relations[identifier]
+                    a, b = (session.context.entities[i] for i in (relation.entity_a_id, relation.entity_b_id))
+                    values = (a.canonical_value, a.entity_type, 'Co-occurrence' if relation.relation_type == 'co_occurrence' else relation.relation_type,
+                              b.canonical_value, b.entity_type, str(len(relation.occurrences)))
+                    for col, value in enumerate(values):
+                        item = QTableWidgetItem(value)
+                        item.setData(Qt.ItemDataRole.UserRole, identifier)
+                        item.setToolTip(f'{value}\n{identifier}')
+                        self.table.setItem(row, col, item)
+                self._table_key = table_key
+            self.table.clearSelection();self.table.setCurrentCell(-1,-1)
+            if focused in ids:
+                row = ids.index(focused)
+                self.table.setCurrentCell(row, 0)
+                self.table.selectRow(row)
         self.empty.setText('No active investigation\nLoad or run an investigation to inspect entity relationships.'
                            if session.context is None else
                            'No relations match the current investigation view.\nAdjust the active filters to reveal other relations.')

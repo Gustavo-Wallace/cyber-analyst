@@ -240,7 +240,7 @@ class AnalystPage(QWidget):
         starter_box.addWidget(role(plain_label(
             'Ask about identifiers, alerts, dataset matches or anything found during analysis.'), 'caption'))
         self.transcript_layout.addWidget(self.starter)
-        self.next_steps = NextStepsWidget(session)
+        self.next_steps = NextStepsWidget(session, self)
         self.next_steps.navigated.connect(self.reference_navigated)
         self.transcript_layout.addWidget(self.next_steps)
         self.transcript_layout.addStretch()

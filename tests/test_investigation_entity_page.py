@@ -9,7 +9,7 @@ def focus(s,value):s.navigate(next(r for r in s.search(value) if r.kind=='entity
 def test_entity_details_navigation(window):
  p=window.entity_page;s=window.investigation_session
  assert 'No active' in p.message.text()
- window.set_investigation(synthetic())
+ load(window, synthetic())
  assert p.selector.rowCount()==3
  assert [p.selector.item(i,0).data(Qt.ItemDataRole.UserRole) for i in range(3)]==list(s.view.entity_ids)
  p.selector.selectRow(0)
@@ -29,14 +29,14 @@ def test_entity_details_navigation(window):
 
 def test_filters_lifecycle_isolated(window):
  p=window.entity_page;s=window.investigation_session
- window.set_investigation(synthetic());focus(s,'ana@')
+ load(window, synthetic());focus(s,'ana@')
  s.set_attention_levels(['high']);assert p.selector.rowCount()==3
  s.set_dataset_scope(['remote_access']);assert p.selector.rowCount()==2
  assert s.state.focus.entity_id=='email' and p.panel.isHidden()
  s.set_entity_types(['username']);assert p.selector.rowCount()==1
  s.clear_filters();assert p.selector.rowCount()==3 and not p.panel.isHidden()
  r=synthetic();e=replace(r.entities.entities[0],entity_id='isolated',canonical_value='isolated')
- window.set_investigation(replace(r,entities=replace(r.entities,entities=r.entities.entities+(e,))))
+ load(window, replace(r,entities=replace(r.entities,entities=r.entities.entities+(e,))))
  assert p.selector.rowCount()==4 and not p.selector.selectedItems()
  focus(s,'isolated');assert p.neighbors.rowCount()==0 and 'No visible direct relations' in p.relation_summary.text()
  s.set_dataset_scope(['remote_access']);focus(s,'ana')
@@ -45,3 +45,9 @@ def test_filters_lifecycle_isolated(window):
  assert s.state.focus.entity_id=='ana' and 'hidden' in p.message.text()
  s.set_entity_types(['email']);assert p.selector.rowCount()==0
  s.clear();assert p.panel.isHidden() and 'No active' in p.message.text()
+
+
+def load(window, result):
+    # Deferred pages render on navigation, as in the workstation.
+    window.set_investigation(result)
+    window._open_dashboard_detail('entities')

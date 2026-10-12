@@ -2,6 +2,7 @@
 from PySide6.QtCore import Qt, QSignalBlocker
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableWidgetItem, QSplitter
 from cyber_analyst.context import SearchResult
+from .session_refresh import SessionRefresh
 from .investigation_analysis_page import table, text
 
 
@@ -42,23 +43,30 @@ class InvestigationEntityPage(QWidget):
         self.selector.itemSelectionChanged.connect(self._select)
         self.neighbors.itemActivated.connect(self._neighbor)
         self.occurrences.itemActivated.connect(self._dataset)
-        session.changed.connect(self.refresh)
-        self.refresh()
+        self._table_key = None
+        self._session_refresh = SessionRefresh(self, session, self.refresh, 'entity_id')
 
     def refresh(self):
         s = self.session
         ids = s.view.entity_ids if s.view else ()
+        visible_relations = frozenset(s.view.relation_ids) if s.view else frozenset()
         focus = s.state.focus.entity_id if s.state else None
+        table_key = (s.generation, ids, visible_relations)
         with QSignalBlocker(self.selector):
-            self.selector.setRowCount(0);self.selector.setRowCount(len(ids))
-            for row, identifier in enumerate(ids):
-                e = s.context.entities[identifier]
-                values = (e.canonical_value,e.entity_type,', '.join(e.dataset_names),
-                          str(len(set(e.relation_ids).intersection(s.view.relation_ids))))
-                for col,value in enumerate(values):
-                    item=QTableWidgetItem(value);item.setToolTip(value+'\n'+identifier)
-                    item.setData(Qt.ItemDataRole.UserRole,identifier);self.selector.setItem(row,col,item)
-                if identifier==focus:self.selector.setCurrentCell(row,0);self.selector.selectRow(row)
+            if table_key != self._table_key:
+                self.selector.setRowCount(0);self.selector.setRowCount(len(ids))
+                for row, identifier in enumerate(ids):
+                    e = s.context.entities[identifier]
+                    values = (e.canonical_value,e.entity_type,', '.join(e.dataset_names),
+                              str(len(visible_relations.intersection(e.relation_ids))))
+                    for col,value in enumerate(values):
+                        item=QTableWidgetItem(value);item.setToolTip(value+'\n'+identifier)
+                        item.setData(Qt.ItemDataRole.UserRole,identifier);self.selector.setItem(row,col,item)
+                self._table_key = table_key
+            self.selector.clearSelection();self.selector.setCurrentCell(-1,-1)
+            if focus in ids:
+                row = ids.index(focus)
+                self.selector.setCurrentCell(row,0);self.selector.selectRow(row)
         self.message.setText('No active investigation.' if s.context is None else
             'Focused entity is hidden by filters.' if focus and focus not in ids else
             'No entities in the current investigation view.' if not ids else
@@ -76,7 +84,7 @@ class InvestigationEntityPage(QWidget):
             for col,value in enumerate((o.dataset_name,o.column_name,o.semantic_type,o.semantic_role,o.value,o.row_count)):
                 item=QTableWidgetItem(text(value));item.setToolTip(text(value));item.setData(Qt.ItemDataRole.UserRole,o.dataset_name)
                 self.occurrences.setItem(row,col,item)
-        relations=tuple(i for i in e.relation_ids if i in s.view.relation_ids)
+        relations=tuple(i for i in e.relation_ids if i in visible_relations)
         self.relation_summary.setText(f'{len(relations)} visible direct relations (activate a neighbor to focus)' if relations else 'No visible direct relations.')
         self.neighbors.setVisible(bool(relations));self.neighbors.setRowCount(len(relations))
         for row,i in enumerate(relations):

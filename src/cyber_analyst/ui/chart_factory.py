@@ -24,6 +24,18 @@ def _axis_labels(points):
     return labels
 
 
+def _time_axis_points(points):
+    """At most three exact dates, spaced by elapsed time rather than row count."""
+    days = [date.fromisoformat(point.label).toordinal() for point in points]
+    midpoint = (days[0] + days[-1]) / 2
+    middle = min(range(len(days)), key=lambda i: abs(days[i] - midpoint))
+    gap = (days[-1] - days[0]) / 4
+    indices = {0, len(points) - 1}
+    if days[middle] - days[0] >= gap and days[-1] - days[middle] >= gap:
+        indices.add(middle)
+    return tuple(points[i] for i in sorted(indices))
+
+
 class CategoryBars(QWidget):
     """Readable category bars with exact tooltips and keyboard-accessible drill-down
     via the containing panel. Native painting avoids one Qt bar set per category.
@@ -201,11 +213,15 @@ class VisualPanel(QWidget):
             # Only a few exact dates on the axis; every point remains in hover data.
             from PySide6.QtCharts import QCategoryAxis
             axis = QCategoryAxis()
-            stride = max(1, (len(points) - 1) // 3)
-            for i in sorted(set((*range(0, len(points), stride), len(points)-1))):
-                axis.append(points[i].label, date.fromisoformat(points[i].label).toordinal())
+            # Even spacing includes the endpoints without an adjacent final tick.
+            # Three exact dates remain readable in the compact dashboard cards.
+            for point in _time_axis_points(points):
+                axis.append(point.label, date.fromisoformat(point.label).toordinal())
             axis.setLabelsPosition(QCategoryAxis.AxisLabelsPosition.AxisLabelsPositionOnValue)
-            axis.setRange(date.fromisoformat(points[0].label).toordinal(), date.fromisoformat(points[-1].label).toordinal())
+            first = date.fromisoformat(points[0].label).toordinal()
+            last = date.fromisoformat(points[-1].label).toordinal()
+            # Reserve room for the complete rightmost date at its actual value.
+            axis.setRange(first, last + (last - first) * .08)
             def hover(position, active):
                 point = min(points, key=lambda p: abs(date.fromisoformat(p.label).toordinal() - position.x()))
                 self._hover(f'{point.label}: {point.value}', active)

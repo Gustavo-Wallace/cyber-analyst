@@ -7,6 +7,7 @@ from PySide6.QtCharts import QChart, QChartView, QBarSeries, QBarSet, QBarCatego
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QStackedWidget, QTableWidget,
     QTableWidgetItem, QAbstractItemView, QHeaderView, QSplitter)
 from cyber_analyst.context import SearchResult
+from .session_refresh import SessionRefresh
 from .theme import COLORS
 from .presentation_labels import human_label
 
@@ -66,8 +67,7 @@ class InvestigationAnalysisPage(QStackedWidget):
         self.chart_kind = None
         self.selector.itemSelectionChanged.connect(self._select)
         self.selector.itemActivated.connect(lambda _: self._select())
-        session.changed.connect(self.refresh)
-        self.refresh()
+        self._session_refresh = SessionRefresh(self, session, self.refresh, 'analysis')
 
     def refresh(self):
         s = self.session

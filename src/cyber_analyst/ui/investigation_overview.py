@@ -3,6 +3,7 @@ from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QGridLayout, QLayout,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QProgressBar, QPushButton, QSizePolicy)
 from cyber_analyst.analyst import AnalystReference
+from .session_refresh import SessionRefresh
 from .theme import SPACE, label, panel, role, table_style
 from .workstation import WorkspacePages
 from .count_labels import count_label
@@ -207,7 +208,7 @@ class InvestigationOverview(WorkspacePages):
         self.correlation_highlights = Highlights('Dataset matches', 'Most shared keys first. Up to two shown.', 'No visible dataset matches.')
         self.highlights_grid = ResponsiveGrid((self.finding_highlights, self.entity_highlights, self.correlation_highlights), 280, 3, align_top=True)
         layout.addWidget(self.highlights_grid)
-        self.next_steps = NextStepsWidget(session)
+        self.next_steps = NextStepsWidget(session, self.dashboard)
         self.next_steps.navigated.connect(self.target_requested)
         layout.addWidget(self.next_steps)
         coverage_panel, box = panel('Dataset coverage', 'Visible investigation objects by source dataset. Select a row to inspect its counts.')
@@ -227,8 +228,7 @@ class InvestigationOverview(WorkspacePages):
         box.addWidget(self.coverage_empty)
         layout.addWidget(coverage_panel)
         layout.addStretch()
-        session.changed.connect(self.refresh)
-        self.refresh()
+        self._session_refresh = SessionRefresh(self, session, self.refresh)
 
     def _activate(self, reference):
         self.session.navigate_reference(reference)

@@ -82,6 +82,7 @@ def test_analysis_grid_uses_theme_without_changing_series_or_result(window):
     from test_investigation_analysis_page import fixture
     result = fixture()
     window.set_investigation(result)
+    window._open_dashboard_detail('analyses')
     page = window.analysis_explorer
     page.selector.selectRow(0)
     chart = page.chart_view.chart()

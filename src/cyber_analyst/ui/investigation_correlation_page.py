@@ -2,6 +2,7 @@
 from PySide6.QtCore import Qt, QSignalBlocker
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidgetItem, QSplitter
 from cyber_analyst.context import SearchResult
+from .session_refresh import SessionRefresh
 from .investigation_analysis_page import table, text
 from .investigation_overview import CountBars
 
@@ -41,8 +42,7 @@ class InvestigationCorrelationPage(QWidget):
         self.left.clicked.connect(lambda:self._dataset('left_dataset'))
         self.right.clicked.connect(lambda:self._dataset('right_dataset'))
         self.selector.itemSelectionChanged.connect(self._select)
-        session.changed.connect(self.refresh)
-        self.refresh()
+        self._session_refresh = SessionRefresh(self, session, self.refresh, 'correlation_id')
 
     def refresh(self):
         s=self.session

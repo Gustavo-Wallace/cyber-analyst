@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QSizePolicy
 from cyber_analyst.analyst import AnalystReference
 from cyber_analyst.context.next_steps import NextStepsService
 from .analyst_references import REFERENCE_UNAVAILABLE
+from .session_refresh import SessionRefresh
 from .theme import SPACE, label, role
 from .presentation_labels import finding_supporting_label
 
@@ -35,8 +36,8 @@ class NextStepsWidget(QWidget):
         self.unavailable = label(REFERENCE_UNAVAILABLE, 'caption', 'warning')
         self.unavailable.hide()
         box.addWidget(self.unavailable)
-        session.changed.connect(self.refresh)
-        self.refresh()
+        # This widget hides itself when empty; its page owns visibility/lifecycle.
+        self._session_refresh = SessionRefresh(self, session, self.refresh, visibility_owner=parent)
 
     def refresh(self):
         for button in self.buttons:

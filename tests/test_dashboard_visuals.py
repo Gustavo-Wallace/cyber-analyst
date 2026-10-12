@@ -62,6 +62,41 @@ def test_dense_daily_series_and_time_truncation():
     assert '48 of 60' in spec.subtitle
 
 
+@pytest.mark.parametrize('count', [3, 14, 30, 48])
+def test_time_axis_bounds_density_without_changing_series(window, count):
+    from cyber_analyst.ui.chart_factory import VisualPanel
+    from PySide6.QtCore import Qt
+    rows = tuple(((date(2026, 9, 1) + timedelta(days=i)).isoformat(), i + 1)
+                 for i in range(count))
+    source = step('time_series_count', ('day', 'count'), rows)
+    spec = analysis_visual('data', source)
+    panel = VisualPanel(spec)
+    try:
+        chart = panel.chart_view.chart()
+        axis = chart.axes(Qt.Orientation.Horizontal)[0]
+        labels = axis.categoriesLabels()
+        assert 2 <= len(labels) <= 3
+        assert labels[0] == rows[0][0] and labels[-1] == rows[-1][0]
+        assert axis.min() == date.fromisoformat(rows[0][0]).toordinal()
+        assert axis.max() > date.fromisoformat(rows[-1][0]).toordinal()
+        days = [date.fromisoformat(label).toordinal() for label in labels]
+        assert days == sorted(set(days))
+        assert min(b-a for a, b in zip(days, days[1:])) >= (days[-1]-days[0]) / 4
+        assert [(p.x(), p.y()) for p in chart.series()[0].points()] == [
+            (date.fromisoformat(day).toordinal(), value) for day, value in rows]
+        assert source.rows is rows
+    finally:
+        panel.deleteLater()
+
+
+def test_time_axis_handles_irregular_dates_without_adjacent_final_labels():
+    from cyber_analyst.ui.chart_factory import _time_axis_points
+    points = tuple(VisualPoint(day, 1, day) for day in
+                   ('2026-01-01', '2026-12-29', '2026-12-30', '2026-12-31'))
+    assert _time_axis_points(points) == (points[0], points[-1])
+    assert _time_axis_points(points) == _time_axis_points(points)
+
+
 def test_readable_categories_and_safety_fallbacks():
     assert category_text(('ana',)) == 'ana'
     assert category_text(('ana','yes')) == 'ana | yes'
