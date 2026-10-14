@@ -78,3 +78,43 @@ def test_literal_path_and_case_distinct_headers(tmp_path):
     result = correlate(a, b, "key", "key")
     assert result.preview_columns == ("A.key", "A.KEY", "B.key")
     assert result.preview_rows == (("x", "y", "x"),)
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_spill_directory_is_isolated_and_removed(tmp_path, monkeypatch, fail):
+    from pathlib import Path
+    from cyber_analyst.correlation import engine
+    import tempfile
+
+    a, b = pair(tmp_path, "key\nx\nx\n", "key\nx\n")
+    cwd = tmp_path / "installation"
+    temp_root = tmp_path / "user_temp"
+    cwd.mkdir()
+    temp_root.mkdir()
+    monkeypatch.chdir(cwd)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))
+    original_connect = engine.duckdb.connect
+    directories = []
+
+    def connect(*args, **kwargs):
+        directory = Path(kwargs["config"]["temp_directory"])
+        assert directory.parent == temp_root
+        assert directory.is_dir()
+        directories.append(directory)
+        connection = original_connect(*args, **kwargs)
+        assert connection.execute("SELECT current_setting('temp_directory')").fetchone()[0] == str(directory)
+        return connection
+
+    monkeypatch.setattr(engine.duckdb, "connect", connect)
+    if fail:
+        def broken_relation(*args):
+            (directories[-1] / "synthetic-spill.tmp").write_bytes(b"synthetic")
+            raise engine.duckdb.Error("controlled failure")
+        monkeypatch.setattr(engine, "_relation", broken_relation)
+        with pytest.raises(CorrelationError):
+            correlate(a, b, "key", "key")
+    else:
+        assert correlate(a, b, "key", "key").summary.matched_rows == 2
+    assert directories and all(not directory.exists() for directory in directories)
+    assert not list(cwd.iterdir())
+    assert not list(temp_root.iterdir())

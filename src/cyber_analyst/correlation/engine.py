@@ -6,6 +6,8 @@ O preview preserva valores originais e distingue as origens por A./B.
 Os arquivos devem permanecer disponíveis e inalterados entre as consultas.
 """
 
+from tempfile import TemporaryDirectory
+
 import duckdb
 import polars as pl
 
@@ -77,7 +79,10 @@ def correlate(dataset_a: Dataset, dataset_b: Dataset, column_a: str, column_b: s
         return expression
 
     try:
-        with duckdb.connect(":memory:") as connection:
+        # Each operation owns its spill directory, outside the installation/cwd.
+        # Close DuckDB before removing potentially sensitive temporary data.
+        with TemporaryDirectory(prefix="cyber-analyst-correlation-") as spill_directory, \
+                duckdb.connect(":memory:", config={"temp_directory": spill_directory}) as connection:
             _relation(connection, dataset_a, "source_a")
             _relation(connection, dataset_b, "source_b")
             for side, index, dtype in (("a", index_a, dtype_a), ("b", index_b, dtype_b)):
